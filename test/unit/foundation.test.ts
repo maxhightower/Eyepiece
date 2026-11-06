@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { normalizeSettings, describeStatus, targetLanguages, languageOptions, filterLanguages, providerIds } from '../../src/config';
+import { normalizeSettings, describeStatus, targetLanguages, languageOptions, filterLanguages, pickModel, providerIds } from '../../src/config';
 import { UnavailableProvider } from '../../src/providers/unavailable';
 import type { TranslationRequest } from '../../src/providers/types';
 const request: TranslationRequest = { source: { uri: 'file:///sample.rs', text: 'fn main() {}', language: 'rust', revision: 'fixture' }, targetLanguage: 'python' };
@@ -36,6 +36,15 @@ test('UI buttons are declared and sit left of neighbouring editor title buttons'
   assert.match(fs.readFileSync(path.join(root, '.vscodeignore'), 'utf8'), /!media/);
   assert.deepEqual(contributes.configuration.properties['eyepiece.targetLanguage'].enum, Object.keys(targetLanguages));
   assert.deepEqual(contributes.configuration.properties['eyepiece.provider'].enum, [...providerIds]);
+});
+test('model choice prefers the session, then the saved default, then the first model', () => {
+  const models = ['a', 'b', 'c'];
+  assert.equal(pickModel(models), 'a');
+  assert.equal(pickModel(models, 'b'), 'b');
+  assert.equal(pickModel(models, 'b', 'c'), 'c');
+  assert.equal(pickModel(models, 'gone'), 'a', 'a saved model that was removed falls back');
+  assert.equal(pickModel(models, 'b', 'gone'), 'b');
+  assert.equal(pickModel([], 'b'), undefined);
 });
 test('language search matches labels and ids, ignoring case', () => {
   const found = (query: string) => filterLanguages(languageOptions(), query).map(option => option.id);

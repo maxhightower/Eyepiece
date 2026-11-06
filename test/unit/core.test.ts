@@ -15,7 +15,7 @@ test('malformed, stale, overlapping, reversed and surrogate-splitting edits are 
 });
 test('ambiguity and no-op proposals cannot apply', () => {
   assert.throws(() => applyProposal(source,{...parseProposal(proposal([{start:0,end:1,text:'A'}]),source),unresolvedChoices:['which?']}), /ambiguous/);
-  assert.throws(() => applyProposal(source,parseProposal(proposal([]),source)), /no source changes/);
+  assert.throws(() => applyProposal(source,parseProposal(proposal([]),source)), /Nothing to apply/);
 });
 test('translation requires revision, bounded mappings, caveats and nonempty text', () => {
   const translation = {text:'python',sourceRevision:source.revision,mappings:[{sourceStart:0,sourceEnd:3,viewStart:0,viewEnd:6}],caveats:['overflow differs']};

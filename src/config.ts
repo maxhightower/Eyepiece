@@ -21,6 +21,10 @@ export const targetLanguages = {
 export type TargetLanguage = keyof typeof targetLanguages;
 export interface LanguageOption { id: string; label: string }
 export const languageOptions = (): LanguageOption[] => Object.entries(targetLanguages).map(([id, item]) => ({ id, label: item.label }));
+/** The session choice wins, then the saved default, then the first model. A choice that no longer exists is skipped. */
+export function pickModel(models: string[], saved?: string, override?: string): string | undefined {
+  return [override, saved].find(id => id !== undefined && models.includes(id)) ?? models[0];
+}
 export function filterLanguages(options: LanguageOption[], query: string): LanguageOption[] {
   const text = query.trim().toLowerCase();
   return options.filter(option => option.label.toLowerCase().includes(text) || option.id.includes(text));

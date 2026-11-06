@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
-import { languageOptions, providerIds, providerLabels, ProviderId } from './config';
+import { LanguageOption, languageOptions, providerIds, providerLabels, ProviderId } from './config';
 
-interface SidebarState { provider: ProviderId; language: string; panelOpen: boolean; previewReady: boolean }
-type Inbound = { type: 'ready' } | { type: 'command'; id: string } | { type: 'language'; id: string } | { type: 'provider'; id: string };
-const allowed = new Set(['eyepiece.setApiKey', 'eyepiece.chooseModel', 'eyepiece.translate', 'eyepiece.reopenDraft', 'eyepiece.preview', 'eyepiece.apply', 'eyepiece.openSettings']);
+interface SidebarState { provider: ProviderId; language: string; panelOpen: boolean; previewReady: boolean; models: LanguageOption[]; model: string; modelError: string }
+type Inbound = { type: 'ready' } | { type: 'command'; id: string } | { type: 'language'; id: string } | { type: 'provider'; id: string } | { type: 'model'; id: string };
+const allowed = new Set(['eyepiece.setApiKey', 'eyepiece.translate', 'eyepiece.reopenDraft', 'eyepiece.preview', 'eyepiece.apply', 'eyepiece.openSettings']);
 
 /** Sidebar view. It holds the language dropdown, which VS Code's built-in view buttons cannot show. */
 export class EyepieceSidebar implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
-  constructor(private readonly extensionUri: vscode.Uri, private readonly state: () => SidebarState, private readonly setLanguage: (id: string) => Thenable<void>, private readonly setProvider: (id: string) => Thenable<void>) {}
+  constructor(private readonly extensionUri: vscode.Uri, private readonly state: () => SidebarState, private readonly setLanguage: (id: string) => Thenable<void>, private readonly setProvider: (id: string) => Thenable<void>, private readonly setModel: (id: string) => Thenable<void>, private readonly onReady: () => Thenable<void>) {}
   resolveWebviewView(view: vscode.WebviewView): void {
     const media = vscode.Uri.joinPath(this.extensionUri, 'media');
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
@@ -19,9 +19,10 @@ export class EyepieceSidebar implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${asset('panel.css')}"><title>Eyepiece</title></head><body class="sidebar"><div id="app"></div><script nonce="${nonce}" src="${asset('sidebar.js')}"></script></body></html>`;
     view.webview.onDidReceiveMessage(async (message: Inbound) => {
-      if (message.type === 'ready') this.update();
+      if (message.type === 'ready') { this.update(); await this.onReady(); }
       if (message.type === 'language') await this.setLanguage(message.id);
       if (message.type === 'provider') await this.setProvider(message.id);
+      if (message.type === 'model') await this.setModel(message.id);
       if (message.type === 'command' && allowed.has(message.id)) await vscode.commands.executeCommand(message.id);
     });
     view.onDidDispose(() => { this.view = undefined; });
