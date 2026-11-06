@@ -58,7 +58,8 @@ button.primary:disabled { background: var(--vscode-button-secondaryBackground); 
 .composer textarea { flex: 1; resize: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; padding: 5px 6px; font: inherit; }
 .composer textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
 body.sidebar { overflow: auto; background: transparent; }
-body.sidebar #app { display: block; height: auto; padding: 8px 12px 16px; }
+body.sidebar #app { box-sizing: border-box; min-height: 100%; height: auto; padding: 8px 12px 8px; }
+.sidebar-bottom { margin-top: auto; margin-bottom: 0; }
 .sidebar-section { margin-bottom: 14px; }
 .sidebar-section p { margin: 0 0 8px; }
 .sidebar-section > button { display: block; width: 100%; margin-bottom: 6px; padding: 6px 10px; }

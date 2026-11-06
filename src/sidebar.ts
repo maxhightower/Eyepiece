@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import { LanguageOption, languageOptions, providerIds, providerLabels, ProviderId } from './config';
 
-interface SidebarState { provider: ProviderId; language: string; panelOpen: boolean; previewReady: boolean; models: LanguageOption[]; model: string; modelError: string }
+interface SidebarState { provider: ProviderId; language: string; fileOpen: boolean; panelOpen: boolean; previewReady: boolean; models: LanguageOption[]; model: string; modelError: string }
 type Inbound = { type: 'ready' } | { type: 'command'; id: string } | { type: 'language'; id: string } | { type: 'provider'; id: string } | { type: 'model'; id: string };
 const allowed = new Set(['eyepiece.setApiKey', 'eyepiece.translate', 'eyepiece.reopenDraft', 'eyepiece.preview', 'eyepiece.apply', 'eyepiece.openSettings']);
 
