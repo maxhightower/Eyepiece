@@ -17,7 +17,7 @@ export function activate(context: vscode.ExtensionContext): void {
     badge.command = 'eyepiece.showStatus';
   };
   const setLanguage = async (id: string) => { await vscode.workspace.getConfiguration('eyepiece').update('targetLanguage', id, vscode.ConfigurationTarget.Global); };
-  // Workflow and Cargo output also streams into the panel, which replaces the output tab as the place to look.
+  // Workflow and check output also streams into the panel, which replaces the output tab as the place to look.
   const channel = new Proxy(output, { get(target, key: keyof vscode.OutputChannel) {
     if (key === 'append' || key === 'appendLine') return (value: string) => { target[key](value); panel.log(key === 'append' ? value : value + '\n'); };
     if (key === 'show') return () => undefined;
@@ -33,7 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons);
   const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ enabled: settings().provider === 'copilot', language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview && !panel.needsTestDecision }), setLanguage);
-  const isRust = (doc: vscode.TextDocument) => doc.languageId === 'rust' && doc.uri.scheme === 'file';
+  const isSource = (doc: vscode.TextDocument) => doc.uri.scheme === 'file';
   context.subscriptions.push(output, badge, workflow, panel,
     vscode.window.registerWebviewViewProvider('eyepiece.actions', sidebar),
     vscode.commands.registerCommand('eyepiece.openWelcome', async () => {
@@ -56,8 +56,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('eyepiece.enableCopilot', () => vscode.workspace.getConfiguration('eyepiece').update('provider', 'copilot', vscode.ConfigurationTarget.Global)),
     vscode.commands.registerCommand('eyepiece.translate', async () => {
       const active = vscode.window.activeTextEditor?.document;
-      const doc = active && isRust(active) ? active : vscode.window.visibleTextEditors.map(editor => editor.document).find(isRust);
-      if (!doc) { await vscode.window.showErrorMessage('Open a Rust file first.'); return; }
+      const doc = active && isSource(active) ? active : vscode.window.visibleTextEditors.map(editor => editor.document).find(isSource);
+      if (!doc) { await vscode.window.showErrorMessage('Open a saved file first.'); return; }
       await panel.open(doc);
     }),
     vscode.commands.registerCommand('eyepiece.preview', () => panel.preview()),

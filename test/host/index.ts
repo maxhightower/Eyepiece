@@ -47,6 +47,7 @@ async function panelLoop(): Promise<void> {
     id:'test:panel',
     async translate(request) { languages.push(request.targetLanguage); return {text:`// ${request.targetLanguage}\nscore >= minimum\n`,sourceRevision:request.source.revision,mappings:[{sourceStart:0,sourceEnd:5,viewStart:0,viewEnd:5}],caveats:['Scripted']}; },
     async proposeEdit(request) {
+      if (request.source.language==='python') { const at=request.source.text.indexOf('return x'); return {sourceRevision:request.source.revision,replacements:[{start:at,end:at+8,text:'return x + 1'}],explanation:'Add one',unresolvedChoices:[]}; }
       const start=request.source.text.indexOf(needle), assertion='vec![8, 5]', test=request.source.text.indexOf(assertion);
       return {sourceRevision:request.source.revision,replacements:[{start,end:start+needle.length,text:edited},...(editTests?[{start:test,end:test+assertion.length,text:'vec![8, 5,]'}]:[])],explanation:'Skip 42',unresolvedChoices:[]};
     },
@@ -126,7 +127,25 @@ async function panelLoop(): Promise<void> {
     panel.reject();
     await panel.ask('Skip 42 and update the tests');
     assert.equal(panel.needsTestDecision,false,'asking for test changes counts as intent');
-    console.log('Panel host checks passed: webview load, no draft tab, typed edit, request box, review, reject, apply + real Cargo, language switch, test edit gate');
+    panel.reject();
+    const scriptUri=vscode.Uri.joinPath(folder,'sample.py');
+    await vscode.workspace.fs.writeFile(scriptUri,Buffer.from('def f(x):\n    return x\n'));
+    const script=await vscode.workspace.openTextDocument(scriptUri);
+    assert.equal(script.languageId,'python');
+    language='rust';await panel.open(script);
+    assert.ok(panel.draftUri!.path.endsWith('.rs.draft'),'any file can be viewed in any language');
+    language='python';await panel.languageChanged();
+    assert.ok(panel.draftUri!.path.endsWith('.md.draft'),'a file in the chosen language shows English');
+    assert.match(panel.statusText,/already Python/);
+    language='go';await panel.languageChanged();
+    await panel.edit(panel.text+'typed\n');
+    await panel.preview();
+    await panel.apply();
+    assert.equal(panel.lastError,'');
+    assert.match(panel.statusText,/nothing verified/,'unchecked changes must say so');
+    assert.ok(script.getText().includes('return x + 1'));
+    await vscode.workspace.fs.delete(scriptUri);
+    console.log('Panel host checks passed: webview load, no draft tab, typed edit, request box, review, reject, apply + real Cargo, language switch, test edit gate, any source language');
   } finally {
     panel.dispose();workflow.dispose();output.dispose();
     const restore=new vscode.WorkspaceEdit();restore.replace(source.uri,new vscode.Range(source.positionAt(0),source.positionAt(source.getText().length)),original);
@@ -187,7 +206,7 @@ async function firstLoop(): Promise<void> {
     const controller=new AbortController();controller.abort(new Error('cancelled'));
     await assert.rejects(workflow.preview(draft,controller.signal),/cancelled/);
     mode='invalid';await workflow.preview(draft,signal);
-    await assert.rejects(workflow.apply(draft,signal),/Cargo checks failed/);
+    await assert.rejects(workflow.apply(draft,signal),/Checks failed/);
     assert.ok(source.getText().includes('BROKEN RUST CODE'));
     assert.ok(draft.getText().includes('r.score != 0'));
     const restore=new vscode.WorkspaceEdit();restore.replace(source.uri,new vscode.Range(source.positionAt(0),source.positionAt(source.getText().length)),original);

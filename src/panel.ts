@@ -117,13 +117,15 @@ export class EyepiecePanel implements vscode.Disposable {
     this.publish(true);
   }
   private label(id = this.language()): string { return targetLanguages[id as keyof typeof targetLanguages]?.label ?? id; }
+  /** A file cannot be translated into its own language, so that choice shows the English explanation. */
+  private effectiveLanguage(source: vscode.TextDocument): string { return source.languageId === this.language() ? 'english' : this.language(); }
   private async translate(source: vscode.TextDocument): Promise<void> {
-    const language = this.language();
+    const language = this.effectiveLanguage(source);
     this.sourceUri = source.uri;
     await this.run(`Translating to ${this.label(language)}…`, true, async signal => {
       const uri = await this.workflow.translate(source, signal, { language, reveal: false });
       await this.load(await vscode.workspace.openTextDocument(uri));
-      return '';
+      return language === this.language() ? '' : `This file is already ${this.label()}, so here is the English explanation.`;
     });
   }
   /** Eye button: reveal the panel beside the file, translating unless this view is already current. */
@@ -131,13 +133,18 @@ export class EyepiecePanel implements vscode.Disposable {
     const existing = this.panel;
     this.ensure();
     if (existing) existing.reveal(existing.viewColumn, false);
-    if (this.draft && this.sourceUri?.toString() === source.uri.toString() && this.draftLanguage === this.language()) return;
+    if (this.draft && this.sourceUri?.toString() === source.uri.toString() && this.draftLanguage === this.effectiveLanguage(source)) return;
     await this.translate(source);
   }
   async languageChanged(): Promise<void> {
     this.publish();
-    if (!this.panel || !this.sourceUri || this.draftLanguage === this.language()) return;
-    await this.translate(await vscode.workspace.openTextDocument(this.sourceUri));
+    if (!this.panel || !this.sourceUri) return;
+    const source = await vscode.workspace.openTextDocument(this.sourceUri);
+    if (this.draftLanguage === this.effectiveLanguage(source)) {
+      if (this.language() !== this.draftLanguage) { this.status = `This file is already ${this.label()}, so here is the English explanation.`; this.publish(); }
+      return;
+    }
+    await this.translate(source);
   }
   private async writeDraft(text: string): Promise<void> {
     const draft = this.draft;
@@ -161,11 +168,11 @@ export class EyepiecePanel implements vscode.Disposable {
     const blocked = review.tests.touchesTests && !review.testsRequested;
     this.review = { diff: lineDiff(review.before, review.after), explanation: review.explanation,
       ...(review.tests.touchesTests ? { tests: { diff: lineDiff(review.before, review.tests.testsOnly, 0), blocked, canOmit: review.tests.withoutTests !== undefined } } : {}) };
-    return blocked ? 'This change also edits tests you did not ask to change.' : 'Review the Rust change below. Nothing has been applied.';
+    return blocked ? 'This change also edits tests you did not ask to change.' : 'Review the change below. Nothing has been applied.';
   }
   async preview(): Promise<void> {
     if (!this.draft) return;
-    await this.run('Working out the Rust change…', true, signal => this.propose(signal));
+    await this.run('Working out the source change…', true, signal => this.propose(signal));
   }
   /** Request box: the model revises the view, then the normal review flow takes over. */
   async ask(request: string): Promise<void> {
@@ -176,7 +183,7 @@ export class EyepiecePanel implements vscode.Disposable {
       await this.writeDraft(text);
       this.workflow.discard(this.draft!);
       this.publish(true);
-      this.status = 'Working out the Rust change…'; this.publish();
+      this.status = 'Working out the source change…'; this.publish();
       return await this.propose(signal);
     });
   }
@@ -184,12 +191,13 @@ export class EyepiecePanel implements vscode.Disposable {
     if (!this.draft || !this.review) return;
     this.log_ = '';
     const touched = this.review.tests !== undefined;
-    await this.run('Applying and running Cargo…', false, async signal => {
+    await this.run('Applying and running checks…', false, async signal => {
       if (!await this.workflow.apply(this.draft!, signal, { reveal: false, ...(tests ? { tests } : {}) })) return '';
       await this.load((await this.workflow.selectedDraft())!);
-      if (tests === 'omit') return 'Applied without the test edits. cargo check and cargo test passed.';
-      if (tests === 'allow') return 'Applied. cargo check and cargo test passed with test changes you approved.';
-      return touched ? 'Applied. cargo check and cargo test passed with the test changes you asked for.' : 'Applied. cargo check and cargo test passed.';
+      const checks = this.workflow.checksRan ? 'Checks passed' : 'No checks are set up for this file, so nothing verified this change';
+      if (tests === 'omit') return `Applied without the test edits. ${checks}.`;
+      if (tests === 'allow') return `Applied with test changes you approved. ${checks}.`;
+      return touched ? `Applied with the test changes you asked for. ${checks}.` : `Applied. ${checks}.`;
     });
   }
   reject(): void {

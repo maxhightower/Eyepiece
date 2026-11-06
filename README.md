@@ -1,6 +1,6 @@
 # Eyepiece
 
-Read Rust through an editable view in a language you know, then review and explicitly apply the intended change to the original Rust.
+Read any source file through an editable view in a language you know, or in plain English, then review and explicitly apply the intended change to the original file.
 
 EYE-0 foundation and EYE-1 first working loop are implemented. This is an experimental local VS Code extension. AI translations are approximations; the Rust source remains authoritative.
 
@@ -21,13 +21,14 @@ For a dependency-free example, open `fixtures/rust` as the workspace. Ask the Py
 
 ## Current boundaries
 
-- Rust source only, viewed as a plain-English explanation or as Python, TypeScript, JavaScript, Go, Java, C#, or C++; one saved local Rust file, maximum 100,000 characters.
+- Any saved local text file, up to 100,000 characters, viewed as a plain-English explanation or in Python, Rust, TypeScript, JavaScript, Go, Java, C#, C++, C, Ruby, PHP, Swift, or Kotlin. A file set to its own language shows English.
+- Apply runs Cargo for Rust, `go test` for Go, `npm test` for JavaScript and TypeScript with a test script, and `pytest` for Python with a `pyproject.toml`, `pytest.ini`, or `setup.cfg`. Anything else applies with no checks, and Eyepiece says so. Translations can be inaccurate, especially between very different languages.
 - Copilot is the only implemented model adapter. ChatGPT and Claude Code settings are reserved and explicitly rejected.
 - No background requests. Translation cache is bounded and lives only for this VS Code session; saved drafts and baseline metadata persist in extension global storage.
 - The model sees the selected source, and for proposals the original and edited Python. No repository-wide context is sent. No telemetry or Eyepiece server.
 - Drafts contain source code in plaintext in VS Code's extension storage. Delete them there when no longer needed. Uninstalling may not remove that storage.
 - Structured responses are validated; invalid ranges, overlap, ambiguity, stale revisions, source drift, or changed drafts block Apply. Clicking a linked declaration in an unedited view jumps to its Rust; links stop working once the view is edited.
-- Proposals that edit `#[cfg(test)]` or `#[test]` code in the file need a decision unless you edited tests in the view or mentioned tests in your request. Tests elsewhere, such as a `tests/` folder, are outside the single file Eyepiece edits. Recognising your own test edits is a word-based check, so an unrecognised one simply asks you to decide.
+- Proposals that edit tests need a decision: `#[cfg(test)]` or `#[test]` code in Rust, and any edit mentioning test, assert, or expect in other languages. The exception is editing tests in the view yourself or mentioning tests in your request. Tests elsewhere, such as a `tests/` folder, are outside the single file Eyepiece edits. Recognising your own test edits is a word-based check, so an unrecognised one simply asks you to decide.
 - Cargo executes in the trusted project and may run build scripts/tests or fetch dependencies. Checks run after Apply, do not prove semantic equivalence, and do not automatically revert a failed edit.
 - File mutation uses VS Code's edit/Undo mechanism. External writers should remain paused during Apply; full filesystem transaction isolation is out of scope.
 - Automated integration tests use scripted model responses with real VS Code and Cargo. `npm run test:live` runs the loop against the signed-in Copilot account in the running VS Code, on a temporary fixture copy, and spends quota. It stops before the Apply confirmation dialog when driving the extension commands.

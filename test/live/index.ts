@@ -9,7 +9,7 @@ import { EyepiecePanel } from '../../src/panel';
 /** Live acceptance: real Copilot, real VS Code, real Cargo, on a temporary fixture copy. Spends Copilot quota. */
 const preferred = ['gpt-5-mini', 'gpt-4.1', 'gpt-4o'];
 export async function run(storage: vscode.Uri, marker: string): Promise<void> {
-  const uiOnly = marker.startsWith('ui:'), wanted = marker.replace(/^(ui|explain):/, '');
+  const uiOnly = marker.startsWith('ui:'), wanted = marker.replace(/^(ui|explain|any):/, '');
   const folder = vscode.workspace.workspaceFolders![0]!.uri;
   const log = (step: string, detail: unknown = '') => fs.appendFileSync(path.join(folder.fsPath, 'live-log.jsonl'), JSON.stringify({ at: new Date().toISOString(), step, detail }) + '\n');
   const output = vscode.window.createOutputChannel('Eyepiece live acceptance');
@@ -69,6 +69,34 @@ export async function run(storage: vscode.Uri, marker: string): Promise<void> {
       return proposal;
     }, reviseView: (request, signal) => copilot.reviseView(request, signal) };
     workflow = new Workflow(storage, output, async () => provider, async () => true);
+    if (marker.startsWith('any:')) {
+      // JavaScript source with real npm tests, viewed as Python, changed by request, then viewed as Rust.
+      const write = (name: string, text: string) => fs.writeFileSync(path.join(folder.fsPath, name), text);
+      write('package.json', JSON.stringify({ name: 'scores', scripts: { test: 'node --test' } }));
+      write('scores.js', "function qualifying(scores, minimum) {\n  return scores.filter(score => score >= minimum);\n}\nmodule.exports = { qualifying };\n");
+      write('scores.test.js', "const test = require('node:test');\nconst assert = require('node:assert');\nconst { qualifying } = require('./scores');\ntest('keeps the boundary', () => assert.deepEqual(qualifying([8, 5, 4], 5), [8, 5]));\n");
+      let target = 'python';
+      workflow = new Workflow(storage, output, async () => provider, async () => true);
+      const any = new EyepiecePanel(vscode.Uri.file(vscode.extensions.getExtension('maxhightower.eyepiece')!.extensionPath), workflow, () => target, async () => undefined);
+      const js = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder, 'scores.js'));
+      await vscode.window.showTextDocument(js);
+      await any.open(js);
+      await any.ready;
+      log('any:python', { error: any.lastError, links: any.linkCount, text: any.text });
+      await any.ask('Skip scores of zero');
+      log('any:review', { hasReview: any.hasReview, decision: any.needsTestDecision, error: any.lastError });
+      log('ui-any');
+      await new Promise(resolve => setTimeout(resolve, 6000));
+      await any.apply(any.needsTestDecision ? 'omit' : undefined);
+      log('any:applied', { status: any.statusText, error: any.lastError, js: js.getText() });
+      target = 'rust'; await any.languageChanged();
+      log('any:rust', { error: any.lastError, text: any.text });
+      log('ui-any-rust');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      any.dispose();
+      log('done');
+      return;
+    }
     if (marker.startsWith('explain:')) {
       workflow = new Workflow(storage, output, async () => provider, async () => true);
       const explained = new EyepiecePanel(vscode.Uri.file(vscode.extensions.getExtension('maxhightower.eyepiece')!.extensionPath), workflow, () => 'english', async () => undefined);

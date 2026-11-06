@@ -1,7 +1,7 @@
 {
   "name": "eyepiece",
   "displayName": "Eyepiece",
-  "description": "View Rust in a language you know, edit it, review the proposed Rust change, and apply with Cargo checks.",
+  "description": "View any code in plain English or another language, edit it there, review the proposed source change, and apply with project checks.",
   "version": "0.0.1",
   "publisher": "maxhightower",
   "private": true,
@@ -23,11 +23,11 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Welcome and sample only; model requests, source edits, and Cargo checks require workspace trust."
+      "description": "Welcome and sample only; model requests, source edits, and project checks require workspace trust."
     },
     "virtualWorkspaces": {
       "supported": false,
-      "description": "EYE-1 requires local Rust files and Cargo."
+      "description": "Eyepiece requires local files."
     }
   },
   "contributes": {
@@ -55,7 +55,7 @@
       },
       {
         "command": "eyepiece.preview",
-        "title": "Eyepiece: Preview Rust Change",
+        "title": "Eyepiece: Preview Source Change",
         "icon": "$(git-compare)"
       },
       {
@@ -81,24 +81,36 @@
           "enum": [
             "english",
             "python",
+            "rust",
             "typescript",
             "javascript",
             "go",
             "java",
             "csharp",
-            "cpp"
+            "cpp",
+            "c",
+            "ruby",
+            "php",
+            "swift",
+            "kotlin"
           ],
           "enumItemLabels": [
             "English",
             "Python",
+            "Rust",
             "TypeScript",
             "JavaScript",
             "Go",
             "Java",
             "C#",
-            "C++"
+            "C++",
+            "C",
+            "Ruby",
+            "PHP",
+            "Swift",
+            "Kotlin"
           ],
-          "description": "Language the Rust source is shown in. English gives a plain-language explanation."
+          "description": "Language files are shown in. English gives a plain-language explanation."
         },
         "eyepiece.provider": {
           "type": "string",
@@ -109,7 +121,7 @@
             "claudeCode"
           ],
           "default": "none",
-          "description": "Select Copilot to enable EYE-1 model requests. No separate Eyepiece account.",
+          "description": "Select Copilot to enable model requests. No separate Eyepiece account.",
           "enumDescriptions": [
             "Disabled",
             "Use GitHub Copilot through the VS Code Language Model API",
@@ -141,7 +153,7 @@
       "editor/title": [
         {
           "command": "eyepiece.translate",
-          "when": "resourceLangId == rust && resourceScheme == file",
+          "when": "resourceScheme == file",
           "group": "navigation@-1"
         }
       ]
@@ -168,6 +180,7 @@
     "@codemirror/lang-javascript": "6.2.5",
     "@codemirror/lang-markdown": "6.5.2",
     "@codemirror/lang-python": "6.2.1",
+    "@codemirror/lang-rust": "6.0.2",
     "@codemirror/language": "6.13.1",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.15",
