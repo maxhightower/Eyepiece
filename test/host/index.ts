@@ -41,12 +41,15 @@ async function panelLoop(): Promise<void> {
   const source = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder,'src','lib.rs'));
   const original = source.getText(), needle = 'record.score >= minimum', edited = 'record.score != 42 && record.score >= minimum';
   await vscode.window.showTextDocument(source);
-  let language = 'python';
+  let language = 'python', editTests = false;
   const languages: string[] = [];
   const provider: ModelProvider = {
     id:'test:panel',
     async translate(request) { languages.push(request.targetLanguage); return {text:`// ${request.targetLanguage}\nscore >= minimum\n`,sourceRevision:request.source.revision,mappings:[{sourceStart:0,sourceEnd:5,viewStart:0,viewEnd:5}],caveats:['Scripted']}; },
-    async proposeEdit(request) { const start=request.source.text.indexOf(needle); return {sourceRevision:request.source.revision,replacements:[{start,end:start+needle.length,text:edited}],explanation:'Skip 42',unresolvedChoices:[]}; },
+    async proposeEdit(request) {
+      const start=request.source.text.indexOf(needle), assertion='vec![8, 5]', test=request.source.text.indexOf(assertion);
+      return {sourceRevision:request.source.revision,replacements:[{start,end:start+needle.length,text:edited},...(editTests?[{start:test,end:test+assertion.length,text:'vec![8, 5,]'}]:[])],explanation:'Skip 42',unresolvedChoices:[]};
+    },
     async reviseView(request) { return {text:request.editedText+`// ${request.changeRequest}\n`,summary:'Updated'}; },
   };
   const output = vscode.window.createOutputChannel('Eyepiece panel tests');
@@ -84,7 +87,46 @@ async function panelLoop(): Promise<void> {
     assert.equal(languages.at(-1),'go');
     await panel.preview();
     assert.match(panel.lastError,/Edit the view/);
-    console.log('Panel host checks passed: webview load, no draft tab, typed edit, request box, review, reject, apply + real Cargo, language switch');
+    const fresh = async (id: string) => {
+      const restore=new vscode.WorkspaceEdit();restore.replace(source.uri,new vscode.Range(source.positionAt(0),source.positionAt(source.getText().length)),original);
+      await vscode.workspace.applyEdit(restore);await source.save();
+      language=id;await panel.languageChanged();
+    };
+    await fresh('english');
+    assert.ok(panel.draftUri!.path.endsWith('.md.draft'));
+    assert.equal(languages.at(-1),'english');
+    editTests=true;
+    await fresh('java');
+    await panel.edit(panel.text+'typed\n');
+    await panel.preview();
+    assert.equal(panel.needsTestDecision,true,'unrequested test edits need a decision');
+    await panel.apply();
+    assert.match(panel.lastError,/did not ask/);
+    assert.equal(source.getText(),original,'blocked apply must not change Rust');
+    await panel.preview();
+    await panel.apply('omit');
+    assert.equal(panel.lastError,'');
+    assert.ok(source.getText().includes(edited)&&source.getText().includes('vec![8, 5]')&&!source.getText().includes('vec![8, 5,]'),'omit keeps production edits only');
+    assert.match(panel.statusText,/without the test edits/);
+    await fresh('cpp');
+    await panel.edit(panel.text+'typed\n');
+    await panel.preview();
+    await panel.apply('allow');
+    assert.ok(source.getText().includes('vec![8, 5,]'));
+    assert.match(panel.statusText,/you approved/);
+    await fresh('javascript');
+    await panel.edit(panel.text+'assert changed\n');
+    await panel.preview();
+    assert.equal(panel.needsTestDecision,false,'typed test edits count as intent');
+    await panel.apply();
+    assert.match(panel.statusText,/you asked for/);
+    await fresh('typescript');
+    await panel.ask('Skip 42');
+    assert.equal(panel.needsTestDecision,true,'a model rewrite of the view is not user intent');
+    panel.reject();
+    await panel.ask('Skip 42 and update the tests');
+    assert.equal(panel.needsTestDecision,false,'asking for test changes counts as intent');
+    console.log('Panel host checks passed: webview load, no draft tab, typed edit, request box, review, reject, apply + real Cargo, language switch, test edit gate');
   } finally {
     panel.dispose();workflow.dispose();output.dispose();
     const restore=new vscode.WorkspaceEdit();restore.replace(source.uri,new vscode.Range(source.positionAt(0),source.positionAt(source.getText().length)),original);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineDiff, locateLinks, locateReplacements, parseRevision, revision, parseTranslation, parseProposal, applyProposal } from '../../src/core';
+import { asksForTestChange, editsTestCode, rustTestRanges, splitTestEdits, lineDiff, locateLinks, locateReplacements, parseRevision, revision, parseTranslation, parseProposal, applyProposal } from '../../src/core';
 const source = { uri: 'file:///sample.rs', language: 'rust', text: 'abc😀xyz', revision: revision('abc😀xyz') };
 const proposal = (replacements: unknown[]) => ({sourceRevision:source.revision, replacements, explanation:'change', unresolvedChoices:[]});
 test('valid edits use UTF-16 offsets and apply in source order', () => {
@@ -46,4 +46,48 @@ test('line diff marks changes, keeps context, and collapses the rest', () => {
 test('view revisions must contain text', () => {
   assert.deepEqual(parseRevision({ text: 'x', summary: 's' }), { text: 'x', summary: 's' });
   assert.throws(() => parseRevision({ text: '  ', summary: 's' }), /empty view/);
+});
+const rust = [
+  'fn add(a: i32) -> i32 { a + 1 }',
+  '// #[test] in a comment is not a test',
+  '#[cfg(test)]',
+  'mod tests {',
+  '    #[test]',
+  '    fn braces_in_strings() { assert_eq!("}", "}"); let c = \'}\'; }',
+  '}',
+  'fn after() {}',
+  '#[tokio::test]',
+  'async fn top_level() { assert!(true); }',
+  'fn last() {}',
+].join('\n');
+const source2 = { uri: 'file:///a.rs', language: 'rust', text: rust, revision: revision(rust) };
+const at = (text: string) => rust.indexOf(text);
+const edit = (find: string, text: string) => ({ start: at(find), end: at(find) + find.length, text });
+const plan = (...replacements: Array<{ start: number; end: number; text: string }>) => ({ sourceRevision: source2.revision, replacements, explanation: '', unresolvedChoices: [] });
+test('Rust test ranges cover whole test items and skip lookalikes', () => {
+  const found = rustTestRanges(rust).map(r => rust.slice(r.start, r.end));
+  assert.equal(found.length, 2);
+  assert.ok(found[0]!.startsWith('#[cfg(test)]') && found[0]!.endsWith('}\n}'));
+  assert.ok(found[1]!.startsWith('#[tokio::test]') && found[1]!.endsWith('assert!(true); }'));
+  assert.ok(!rust.slice(0, rustTestRanges(rust)[0]!.start).includes('assert'));
+});
+test('test edits are separated from production edits', () => {
+  const production = edit('a + 1', 'a + 2'), tests = edit('assert!(true)', 'assert!(false)');
+  assert.deepEqual(splitTestEdits(source2, plan(production)), { touchesTests: false, testsOnly: rust });
+  const mixed = splitTestEdits(source2, plan(production, tests));
+  assert.equal(mixed.touchesTests, true);
+  assert.ok(mixed.withoutTests!.includes('a + 2') && mixed.withoutTests!.includes('assert!(true)'));
+  assert.ok(mixed.testsOnly.includes('a + 1') && mixed.testsOnly.includes('assert!(false)'));
+  assert.equal(splitTestEdits(source2, plan(tests)).withoutTests, undefined, 'nothing is left without the test edit');
+  const spanning = { start: at('fn after'), end: at('assert!(true)'), text: '' };
+  assert.equal(splitTestEdits(source2, plan(production, spanning)).withoutTests, undefined, 'partly overlapping edits cannot be separated');
+  assert.equal(splitTestEdits(source2, plan({ start: at('mod tests') + 3, end: at('mod tests') + 3, text: 'x' })).touchesTests, true, 'insertions inside tests count');
+});
+test('only test code and explicit requests count as asking for test changes', () => {
+  assert.equal(editsTestCode('a\n', 'a\nassert x == 1\n'), true);
+  assert.equal(editsTestCode('a\n', 'a\ndef test_new(): pass\n'), true);
+  assert.equal(editsTestCode('a\n', 'a\n# test comment\n'), false);
+  assert.equal(editsTestCode('a\n', 'a\nlatest = 1\n'), false);
+  assert.equal(asksForTestChange('update the tests too'), true);
+  assert.equal(asksForTestChange('skip the latest scores'), false);
 });

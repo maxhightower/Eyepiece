@@ -8,14 +8,15 @@ import { javascript } from '@codemirror/lang-javascript';
 import { java } from '@codemirror/lang-java';
 import { go } from '@codemirror/lang-go';
 import { cpp } from '@codemirror/lang-cpp';
+import { markdown } from '@codemirror/lang-markdown';
 import { languagePicker } from './picker';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
 interface DiffLine { kind: ' ' | '+' | '-' | '…'; text: string }
-interface State { status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string }; notes: string[]; log: string; text?: string }
+interface State { status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
 
-const grammar = (id: string): Extension => ({ python: python(), typescript: javascript({ typescript: true }), javascript: javascript(), go: go(), java: java(), csharp: cpp(), cpp: cpp() } as Record<string, Extension>)[id] ?? [];
+const grammar = (id: string): Extension => ({ english: markdown(), python: python(), typescript: javascript({ typescript: true }), javascript: javascript(), go: go(), java: java(), csharp: cpp(), cpp: cpp() } as Record<string, Extension>)[id] ?? [];
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
 const button = (label: string, className: string, onClick: () => void) => { const node = element('button', className, label); node.addEventListener('click', onClick); return node; };
 
@@ -36,8 +37,15 @@ const reviewTitle = element('h2', '', 'Proposed Rust change');
 const explanation = element('p', 'explanation');
 const diff = element('pre', 'diff');
 const reviewActions = element('div', 'actions');
-reviewActions.append(button('Apply and Run Checks', 'primary', () => vscode.postMessage({ type: 'apply' })), button('Reject', 'secondary', () => vscode.postMessage({ type: 'reject' })));
-review.append(reviewTitle, explanation, diff, reviewActions);
+const applyButton = button('Apply and Run Checks', 'primary', () => vscode.postMessage({ type: 'apply' }));
+const omitButton = button('Apply Without Test Changes', 'primary', () => vscode.postMessage({ type: 'apply', tests: 'omit' }));
+const allowButton = button('Allow Test Changes', 'secondary', () => vscode.postMessage({ type: 'apply', tests: 'allow' }));
+reviewActions.append(applyButton, omitButton, allowButton, button('Reject', 'secondary', () => vscode.postMessage({ type: 'reject' })));
+const testWarning = element('div', 'test-warning');
+const testWarningText = element('p');
+const testDiff = element('pre', 'diff test-diff');
+testWarning.append(testWarningText, testDiff);
+review.append(reviewTitle, testWarning, explanation, diff, reviewActions);
 const details = element('details', 'details');
 const detailsSummary = element('summary', '', 'Notes and Cargo output');
 const notes = element('ul');
@@ -61,6 +69,10 @@ const highlight = HighlightStyle.define([
   { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntax-number)' },
   { tag: [tags.typeName, tags.className, tags.namespace], color: 'var(--syntax-type)' },
   { tag: [tags.function(tags.variableName), tags.function(tags.definition(tags.variableName))], color: 'var(--syntax-function)' },
+  { tag: tags.heading, color: 'var(--syntax-type)', fontWeight: 'bold' },
+  { tag: tags.strong, fontWeight: 'bold' },
+  { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.monospace, color: 'var(--syntax-function)' },
 ]);
 const view = new EditorView({
   parent: editorHost,
@@ -102,7 +114,20 @@ const render = (state: State) => {
   for (const node of reviewActions.querySelectorAll('button')) node.disabled = state.busy;
   if (state.review) {
     explanation.textContent = state.review.explanation;
-    diff.replaceChildren(...state.review.diff.map(line => element('div', { '+': 'add', '-': 'del', ' ': 'same', '…': 'gap' }[line.kind], `${line.kind} ${line.text}`)));
+    const lines = (items: DiffLine[]) => items.map(line => element('div', { '+': 'add', '-': 'del', ' ': 'same', '…': 'gap' }[line.kind], `${line.kind} ${line.text}`));
+    diff.replaceChildren(...lines(state.review.diff));
+    const tests = state.review.tests;
+    testWarning.hidden = !tests;
+    applyButton.hidden = !!tests?.blocked;
+    allowButton.hidden = !tests?.blocked;
+    omitButton.hidden = !tests?.blocked || !tests.canOmit;
+    if (tests) {
+      testWarning.classList.toggle('blocked', tests.blocked);
+      testWarningText.textContent = tests.blocked
+        ? `The model also changed these tests, and you did not ask it to. Passing checks would prove less. ${tests.canOmit ? 'Apply without them to see whether the tests still pass.' : 'These edits cannot be separated from the rest of the change.'}`
+        : 'This change includes the test edits you asked for.';
+      testDiff.replaceChildren(...lines(tests.diff));
+    }
   }
   notes.replaceChildren(...state.notes.map(note => element('li', '', note)));
   log.textContent = state.log;

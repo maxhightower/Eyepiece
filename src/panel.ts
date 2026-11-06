@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import { Workflow } from './workflow';
-import { DiffLine, lineDiff } from './core';
+import { asksForTestChange, DiffLine, editsTestCode, lineDiff } from './core';
 import { TranslationResult } from './providers/types';
 import { languageOptions, targetLanguages } from './config';
 
-interface Review { diff: DiffLine[]; explanation: string }
+interface Review { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }
 type Inbound =
-  | { type: 'ready' } | { type: 'cancel' } | { type: 'preview' } | { type: 'apply' } | { type: 'reject' } | { type: 'drafts' }
+  | { type: 'ready' } | { type: 'cancel' } | { type: 'preview' } | { type: 'apply'; tests?: 'allow' | 'omit' } | { type: 'reject' } | { type: 'drafts' }
   | { type: 'edit'; text: string } | { type: 'ask'; request: string } | { type: 'language'; id: string } | { type: 'jump'; offset: number };
 
 /** The Eyepiece app panel. All safety checks stay in Workflow; this class only drives it and renders state. */
@@ -18,6 +18,8 @@ export class EyepiecePanel implements vscode.Disposable {
   private sourceUri: vscode.Uri | undefined;
   private draftLanguage: string | undefined;
   private review: Review | undefined;
+  /** Intent only comes from the user: their typing or their request, never a model rewrite of the view. */
+  private testsRequested = false;
   private controller: AbortController | undefined;
   private status = ''; private error = ''; private busy = false; private cancellable = false;
   private log_ = '';
@@ -37,6 +39,8 @@ export class EyepiecePanel implements vscode.Disposable {
   get hasReview(): boolean { return this.review !== undefined; }
   get text(): string | undefined { return this.draft?.getText(); }
   get lastError(): string { return this.error; }
+  get statusText(): string { return this.status; }
+  get needsTestDecision(): boolean { return this.review?.tests?.blocked === true; }
   get draftUri(): vscode.Uri | undefined { return this.draft?.uri; }
   get linkCount(): number { return this.baseline?.mappings.length ?? 0; }
 
@@ -68,7 +72,7 @@ export class EyepiecePanel implements vscode.Disposable {
       case 'edit': await this.edit(message.text); break;
       case 'ask': await this.ask(message.request); break;
       case 'preview': await this.preview(); break;
-      case 'apply': await this.apply(); break;
+      case 'apply': await this.apply(message.tests); break;
       case 'reject': this.reject(); break;
       case 'drafts': await this.openDrafts(); break;
       case 'language': if (message.id !== this.language()) await this.setLanguage(message.id); break;
@@ -105,7 +109,7 @@ export class EyepiecePanel implements vscode.Disposable {
   }
   private async load(draft: vscode.TextDocument): Promise<void> {
     const session = await this.workflow.session(draft);
-    this.draft = draft; this.baseline = session.baseline; this.review = undefined;
+    this.draft = draft; this.baseline = session.baseline; this.review = undefined; this.testsRequested = false;
     this.sourceUri = vscode.Uri.parse(session.source.uri); this.draftLanguage = session.targetLanguage ?? 'python';
     this.workflow.remember(draft);
     const name = this.sourceUri.path.split('/').pop();
@@ -145,16 +149,19 @@ export class EyepiecePanel implements vscode.Disposable {
   /** Direct typing in the panel editor. Any edit invalidates a reviewed proposal. */
   async edit(text: string): Promise<void> {
     if (!this.draft || this.draft.getText() === text) return;
+    if (editsTestCode(this.draft.getText(), text)) this.testsRequested = true;
     await this.writeDraft(text);
     this.workflow.discard(this.draft);
     if (this.review) { this.review = undefined; this.publish(); }
   }
   private async propose(signal: AbortSignal): Promise<string> {
     const draft = this.draft!;
-    await this.workflow.preview(draft, signal, { showDiff: false });
+    await this.workflow.preview(draft, signal, { showDiff: false, testsRequested: this.testsRequested });
     const review = this.workflow.review(draft)!;
-    this.review = { diff: lineDiff(review.before, review.after), explanation: review.explanation };
-    return 'Review the Rust change below. Nothing has been applied.';
+    const blocked = review.tests.touchesTests && !review.testsRequested;
+    this.review = { diff: lineDiff(review.before, review.after), explanation: review.explanation,
+      ...(review.tests.touchesTests ? { tests: { diff: lineDiff(review.before, review.tests.testsOnly, 0), blocked, canOmit: review.tests.withoutTests !== undefined } } : {}) };
+    return blocked ? 'This change also edits tests you did not ask to change.' : 'Review the Rust change below. Nothing has been applied.';
   }
   async preview(): Promise<void> {
     if (!this.draft) return;
@@ -163,6 +170,7 @@ export class EyepiecePanel implements vscode.Disposable {
   /** Request box: the model revises the view, then the normal review flow takes over. */
   async ask(request: string): Promise<void> {
     if (!this.draft || !request.trim()) return;
+    if (asksForTestChange(request)) this.testsRequested = true;
     await this.run('Working on your request…', true, async signal => {
       const text = await this.workflow.revise(this.draft!, request.trim(), signal);
       await this.writeDraft(text);
@@ -172,13 +180,16 @@ export class EyepiecePanel implements vscode.Disposable {
       return await this.propose(signal);
     });
   }
-  async apply(): Promise<void> {
+  async apply(tests?: 'allow' | 'omit'): Promise<void> {
     if (!this.draft || !this.review) return;
     this.log_ = '';
+    const touched = this.review.tests !== undefined;
     await this.run('Applying and running Cargo…', false, async signal => {
-      if (!await this.workflow.apply(this.draft!, signal, { reveal: false })) return '';
+      if (!await this.workflow.apply(this.draft!, signal, { reveal: false, ...(tests ? { tests } : {}) })) return '';
       await this.load((await this.workflow.selectedDraft())!);
-      return 'Applied. cargo check and cargo test passed.';
+      if (tests === 'omit') return 'Applied without the test edits. cargo check and cargo test passed.';
+      if (tests === 'allow') return 'Applied. cargo check and cargo test passed with test changes you approved.';
+      return touched ? 'Applied. cargo check and cargo test passed with the test changes you asked for.' : 'Applied. cargo check and cargo test passed.';
     });
   }
   reject(): void {

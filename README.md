@@ -21,12 +21,13 @@ For a dependency-free example, open `fixtures/rust` as the workspace. Ask the Py
 
 ## Current boundaries
 
-- Rust source only, viewed as Python, TypeScript, JavaScript, Go, Java, C#, or C++; one saved local Rust file, maximum 100,000 characters.
+- Rust source only, viewed as a plain-English explanation or as Python, TypeScript, JavaScript, Go, Java, C#, or C++; one saved local Rust file, maximum 100,000 characters.
 - Copilot is the only implemented model adapter. ChatGPT and Claude Code settings are reserved and explicitly rejected.
 - No background requests. Translation cache is bounded and lives only for this VS Code session; saved drafts and baseline metadata persist in extension global storage.
 - The model sees the selected source, and for proposals the original and edited Python. No repository-wide context is sent. No telemetry or Eyepiece server.
 - Drafts contain source code in plaintext in VS Code's extension storage. Delete them there when no longer needed. Uninstalling may not remove that storage.
 - Structured responses are validated; invalid ranges, overlap, ambiguity, stale revisions, source drift, or changed drafts block Apply. Clicking a linked declaration in an unedited view jumps to its Rust; links stop working once the view is edited.
+- Proposals that edit `#[cfg(test)]` or `#[test]` code in the file need a decision unless you edited tests in the view or mentioned tests in your request. Tests elsewhere, such as a `tests/` folder, are outside the single file Eyepiece edits. Recognising your own test edits is a word-based check, so an unrecognised one simply asks you to decide.
 - Cargo executes in the trusted project and may run build scripts/tests or fetch dependencies. Checks run after Apply, do not prove semantic equivalence, and do not automatically revert a failed edit.
 - File mutation uses VS Code's edit/Undo mechanism. External writers should remain paused during Apply; full filesystem transaction isolation is out of scope.
 - Automated integration tests use scripted model responses with real VS Code and Cargo. `npm run test:live` runs the loop against the signed-in Copilot account in the running VS Code, on a temporary fixture copy, and spends quota. It stops before the Apply confirmation dialog when driving the extension commands.

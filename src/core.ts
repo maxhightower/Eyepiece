@@ -107,3 +107,45 @@ export function lineDiff(before: string, after: string, context = 3): DiffLine[]
   if (shown[shown.length - 1]?.kind === '…') shown.pop();
   return shown;
 }
+/** Finds the end of the Rust item starting at `from`, skipping comments, strings, and char literals. */
+function rustItemEnd(text: string, from: number): number {
+  let depth = 0;
+  for (let i = from; i < text.length; i++) {
+    const c = text[i]!, next = text[i + 1];
+    if (c === '/' && next === '/') { const end = text.indexOf('\n', i); if (end < 0) return text.length; i = end; }
+    else if (c === '/' && next === '*') { const end = text.indexOf('*/', i + 2); if (end < 0) return text.length; i = end + 1; }
+    else if (c === '"') { for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === '\\') i++; }
+    else if (c === "'" && /^'(\\.|[^\\'])'/.test(text.slice(i, i + 4))) i = text.indexOf("'", i + 2);
+    else if (c === '{') depth++;
+    else if (c === '}') { if (--depth === 0) return i + 1; }
+    else if (c === ';' && depth === 0) return i + 1;
+  }
+  return text.length;
+}
+/** Ranges of Rust test code: items marked #[cfg(test)], #[test], or a test macro such as #[tokio::test]. */
+export function rustTestRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const match of text.matchAll(/#\[\s*(?:cfg\([^\]]*\btest\b[^\]]*\)|(?:[\w]+::)*test)\s*\]/g)) {
+    const start = match.index, last = ranges[ranges.length - 1];
+    if ((last && start < last.end) || text.slice(text.lastIndexOf('\n', start) + 1, start).includes('//')) continue;
+    ranges.push({ start, end: rustItemEnd(text, start + match[0].length) });
+  }
+  return ranges;
+}
+export interface TestEdits { touchesTests: boolean; testsOnly: string; withoutTests?: string }
+const applyEdits = (text: string, edits: ProposedEdit['replacements']) => [...edits].reverse().reduce((result, e) => result.slice(0, e.start) + e.text + result.slice(e.end), text);
+/** Separates a proposal's test edits. withoutTests is only offered when production edits can stand alone. */
+export function splitTestEdits(source: SourceSnapshot, proposal: ProposedEdit): TestEdits {
+  const ranges = rustTestRanges(source.text);
+  const overlaps = (e: { start: number; end: number }, r: { start: number; end: number }) => e.start === e.end ? r.start < e.start && e.start < r.end : e.start < r.end && e.end > r.start;
+  const touching = proposal.replacements.filter(e => ranges.some(r => overlaps(e, r)));
+  const others = proposal.replacements.filter(e => !touching.includes(e));
+  const partial = touching.some(e => !ranges.some(r => r.start <= e.start && e.end <= r.end));
+  const withoutTests = touching.length && others.length && !partial ? applyEdits(source.text, others) : undefined;
+  return { touchesTests: touching.length > 0, testsOnly: applyEdits(source.text, touching), ...(withoutTests === undefined ? {} : { withoutTests }) };
+}
+/** Whether typed edits change test code in the view. Comment lines do not count; unrecognised edits stay blocked. */
+export function editsTestCode(before: string, after: string): boolean {
+  return lineDiff(before, after).some(line => (line.kind === '+' || line.kind === '-') && !/^\s*(#|\/\/)/.test(line.text) && /\b(test|assert|expect)/i.test(line.text));
+}
+export const asksForTestChange = (request: string): boolean => /\btests?\b/i.test(request);
