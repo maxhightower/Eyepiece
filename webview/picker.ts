@@ -3,17 +3,17 @@ import { filterLanguages, LanguageOption } from '../src/config';
 const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = '') => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
 let nextId = 0;
 
-/** Searchable language dropdown shared by the panel and the sidebar. */
-export function languagePicker(onSelect: (id: string) => void) {
+/** Searchable dropdown shared by the panel and the sidebar. */
+export function languagePicker(onSelect: (id: string) => void, names = { title: 'Language', search: 'Search languages', empty: 'No matching languages', unset: '' }) {
   const id = `language-list-${nextId++}`;
   const root = make('div', 'picker');
   const trigger = make('button', 'picker-trigger');
   const triggerLabel = make('span', 'picker-label');
-  trigger.type = 'button'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false'); trigger.title = 'Language';
+  trigger.type = 'button'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false'); trigger.title = names.title;
   trigger.append(triggerLabel, make('span', 'picker-chevron', '⌄'));
   const popup = make('div', 'picker-popup');
   const search = make('input', 'picker-search');
-  search.type = 'text'; search.placeholder = 'Search languages'; search.setAttribute('role', 'combobox'); search.setAttribute('aria-controls', id); search.setAttribute('aria-expanded', 'true'); search.setAttribute('aria-label', 'Search languages');
+  search.type = 'text'; search.placeholder = names.search; search.setAttribute('role', 'combobox'); search.setAttribute('aria-controls', id); search.setAttribute('aria-expanded', 'true'); search.setAttribute('aria-label', names.search);
   const list = make('ul', 'picker-list');
   list.id = id; list.setAttribute('role', 'listbox');
   popup.append(search, list); popup.hidden = true;
@@ -28,7 +28,7 @@ export function languagePicker(onSelect: (id: string) => void) {
       item.id = `${id}-${index}`; item.setAttribute('role', 'option'); item.setAttribute('aria-selected', String(option.id === value));
       item.addEventListener('mousedown', event => { event.preventDefault(); choose(option); });
       return item;
-    }) : [make('li', 'picker-empty', 'No matching languages')]));
+    }) : [make('li', 'picker-empty', names.empty)]));
     if (shown.length) { search.setAttribute('aria-activedescendant', `${id}-${active}`); list.children[active]?.scrollIntoView({ block: 'nearest' }); }
     else search.removeAttribute('aria-activedescendant');
   };
@@ -49,7 +49,7 @@ export function languagePicker(onSelect: (id: string) => void) {
     root,
     update(next: LanguageOption[], selected: string, disabled: boolean) {
       options = next; value = selected;
-      triggerLabel.textContent = options.find(option => option.id === value)?.label ?? value;
+      triggerLabel.textContent = options.find(option => option.id === value)?.label ?? names.unset;
       trigger.disabled = disabled;
       if (disabled) close();
       if (!popup.hidden) paint();

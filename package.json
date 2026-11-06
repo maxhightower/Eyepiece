@@ -68,8 +68,12 @@
         "title": "Eyepiece: Reopen saved draft"
       },
       {
-        "command": "eyepiece.enableCopilot",
-        "title": "Eyepiece: Enable Copilot"
+        "command": "eyepiece.setApiKey",
+        "title": "Eyepiece: Change API Key"
+      },
+      {
+        "command": "eyepiece.chooseModel",
+        "title": "Eyepiece: Change Model"
       }
     ],
     "configuration": {
@@ -117,16 +121,20 @@
           "enum": [
             "none",
             "copilot",
-            "chatgpt",
+            "anthropic",
+            "openai",
+            "codex",
             "claudeCode"
           ],
           "default": "none",
-          "description": "Select Copilot to enable model requests. No separate Eyepiece account.",
+          "description": "AI provider that receives your code when you click a button. Choose it in the Eyepiece sidebar.",
           "enumDescriptions": [
             "Disabled",
-            "Use GitHub Copilot through the VS Code Language Model API",
-            "Planned; not implemented",
-            "Planned; not implemented"
+            "GitHub Copilot through the VS Code Language Model API",
+            "Anthropic API key, billed by Anthropic",
+            "OpenAI API key, billed by OpenAI",
+            "Your installed Codex with its ChatGPT sign-in",
+            "Your installed Claude Code, for personal use"
           ]
         }
       }
@@ -162,18 +170,20 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -w -p .",
-    "test:unit": "npm run compile && node --test out/test/unit/*.test.js",
+    "test:unit": "npm run compile && node --test out/test/unit/core.test.js out/test/unit/foundation.test.js out/test/unit/providers.test.js",
     "test:host": "npm run compile && npm run build:webview && node scripts/test-host.cjs",
     "test:fixture": "cargo test --locked --manifest-path fixtures/rust/Cargo.toml",
     "check": "npm run test:unit && npm run test:fixture && npm run test:headless",
-    "vscode:prepublish": "npm run compile && npm run build:webview",
+    "vscode:prepublish": "npm run compile && npm run build:webview && npm run build:extension",
     "package": "vsce package --allow-missing-repository --skip-license --out eyepiece-0.0.1.vsix",
     "verify:package": "python3 scripts/verify-package.py",
     "test:headless": "npm run compile && node scripts/test-headless.cjs",
     "test:live": "npm run compile && npm run build:webview && node scripts/test-live.cjs",
-    "build:webview": "esbuild panel=webview/main.ts sidebar=webview/sidebar.ts --bundle --minify --format=iife --target=es2022 --outdir=media"
+    "build:webview": "esbuild panel=webview/main.ts sidebar=webview/sidebar.ts --bundle --minify --format=iife --target=es2022 --outdir=media",
+    "build:extension": "esbuild out/src/extension.js --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=out/src/extension.js --allow-overwrite"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
     "@codemirror/lang-cpp": "6.0.3",
     "@codemirror/lang-go": "6.0.1",
     "@codemirror/lang-java": "6.0.2",
@@ -191,6 +201,7 @@
     "@vscode/vsce": "4.1.0",
     "codemirror": "6.0.2",
     "esbuild": "0.28.2",
+    "openai": "6.49.0",
     "typescript": "5.7.3"
   }
 }

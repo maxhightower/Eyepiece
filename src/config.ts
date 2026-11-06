@@ -1,6 +1,7 @@
-export const providerIds = ['none', 'copilot', 'chatgpt', 'claudeCode'] as const;
+export const providerIds = ['none', 'copilot', 'anthropic', 'openai', 'codex', 'claudeCode'] as const;
 export type ProviderId = typeof providerIds[number];
-/** Languages the Rust source can be viewed in. extension names the saved draft file. */
+export const providerLabels: Record<ProviderId, string> = { none: 'None', copilot: 'GitHub Copilot', anthropic: 'Anthropic API key', openai: 'OpenAI API key', codex: 'Codex (ChatGPT plan)', claudeCode: 'Claude Code (personal use)' };
+/** Languages a source file can be viewed in. extension names the saved draft file. */
 export const targetLanguages = {
   english: { label: 'English', extension: 'md' },
   python: { label: 'Python', extension: 'py' },
@@ -36,7 +37,7 @@ export function describeStatus(settings: Settings): string {
   return `Eyepiece EYE-0 + EYE-1
 Preferred view: ${settings.targetLanguage}
 Preferred provider: ${settings.provider}
-Connection: ${settings.provider === 'copilot' ? 'Copilot selected; model availability checked on request' : 'disabled or not implemented'}
+Connection: ${settings.provider === 'none' ? 'disabled or not implemented' : `${providerLabels[settings.provider]} selected; availability checked on request`}
 Source file → editable view; Preview → explicit Apply → project checks → refreshed view.
-Editing the view does not change the source. No telemetry. Model requests send the selected source and draft to Copilot.`;
+Editing the view does not change the source. No telemetry. Model requests send the selected source and draft to the selected provider.`;
 }

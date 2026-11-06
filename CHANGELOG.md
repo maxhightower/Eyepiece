@@ -3,6 +3,7 @@
 ## 0.0.1
 
 - Eyepiece panel: editable view, plain-language request box, in-panel Rust review with Apply/Reject, live Cargo output, draft history, links from view to Rust, and a language switcher for seven languages.
+- AI providers: Anthropic and OpenAI API keys, Codex with a ChatGPT plan, and Claude Code, alongside Copilot, chosen from the sidebar.
 - Any source language: any saved file can be viewed in any supported language, with project-aware checks on Apply and a clear note when no checks ran.
 - English view: a plain-English explanation of the file that can be edited or changed by request like any other view.
 - Test edit gate: model edits to tests you did not ask to change are blocked until you allow them or apply without them.

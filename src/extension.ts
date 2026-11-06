@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 import { Workflow } from './workflow';
 import { EyepiecePanel } from './panel';
 import { EyepieceSidebar } from './sidebar';
-import { CopilotProvider } from './providers/copilot';
-import { describeStatus, normalizeSettings } from './config';
+import { ProviderSelector } from './providers/select';
+import { describeStatus, normalizeSettings, ProviderId, providerLabels } from './config';
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Eyepiece');
   const badge = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10);
@@ -24,15 +24,14 @@ export function activate(context: vscode.ExtensionContext): void {
     const value = target[key];
     return typeof value === 'function' ? value.bind(target) : value;
   } });
-  const workflow = new Workflow(vscode.Uri.joinPath(context.globalStorageUri, 'drafts'), channel, async () => {
-    if (settings().provider !== 'copilot') throw new Error('Click Enable Copilot in the Eyepiece sidebar first. ChatGPT and Claude Code adapters are not implemented.');
-    return CopilotProvider.select();
-  });
+  const selector = new ProviderSelector(context);
+  const setProvider = async (id: string) => { await vscode.workspace.getConfiguration('eyepiece').update('provider', id, vscode.ConfigurationTarget.Global); };
+  const workflow = new Workflow(vscode.Uri.joinPath(context.globalStorageUri, 'drafts'), channel, async () => selector.select(settings().provider));
   const updateButtons = () => {
     sidebar.update();
   };
-  const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons);
-  const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ enabled: settings().provider === 'copilot', language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview && !panel.needsTestDecision }), setLanguage);
+  const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons, () => providerLabels[settings().provider]);
+  const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ provider: settings().provider as ProviderId, language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview && !panel.needsTestDecision }), setLanguage, setProvider);
   const isSource = (doc: vscode.TextDocument) => doc.uri.scheme === 'file';
   context.subscriptions.push(output, badge, workflow, panel,
     vscode.window.registerWebviewViewProvider('eyepiece.actions', sidebar),
@@ -54,6 +53,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('eyepiece.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:maxhightower.eyepiece')),
     vscode.commands.registerCommand('eyepiece.enableCopilot', () => vscode.workspace.getConfiguration('eyepiece').update('provider', 'copilot', vscode.ConfigurationTarget.Global)),
+    vscode.commands.registerCommand('eyepiece.setApiKey', async () => {
+      const provider = settings().provider;
+      try { if (provider === 'anthropic' || provider === 'openai') await selector.askForKey(provider); }
+      catch (error) { if (!(error instanceof vscode.CancellationError)) throw error; }
+    }),
+    vscode.commands.registerCommand('eyepiece.chooseModel', async () => {
+      try { await selector.chooseModel(settings().provider); }
+      catch (error) { if (!(error instanceof vscode.CancellationError)) await vscode.window.showErrorMessage(`Eyepiece: ${error instanceof Error ? error.message : String(error)}`); }
+    }),
     vscode.commands.registerCommand('eyepiece.translate', async () => {
       const active = vscode.window.activeTextEditor?.document;
       const doc = active && isSource(active) ? active : vscode.window.visibleTextEditors.map(editor => editor.document).find(isSource);
@@ -65,7 +73,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('eyepiece.reopenDraft', () => panel.openDrafts()),
     vscode.workspace.onDidChangeConfiguration(event => {
       if (!event.affectsConfiguration('eyepiece')) return;
-      refresh(); sidebar.update();
+      refresh(); sidebar.update(); panel.refresh();
       if (event.affectsConfiguration('eyepiece.targetLanguage')) void panel.languageChanged();
     }),
   );

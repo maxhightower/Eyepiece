@@ -8,7 +8,7 @@ EYE-0 foundation and EYE-1 first working loop are implemented. This is an experi
 
 1. Build locally with `npm ci && npm run package`, or download the `eyepiece-vsix` artifact when available from a successful [GitHub Actions run](https://github.com/maxhightower/Eyepiece/actions). Extract the ZIP, then use **Extensions → … → Install from VSIX**.
 2. Open a local Rust/Cargo project in VS Code 1.95 or later. Install Rust/Cargo. Trust the workspace only if you trust its build scripts and tests.
-3. Click the **Eyepiece** eye icon in the activity bar, then **Enable Copilot**. Sign in to GitHub Copilot in VS Code if you have not already. Eyepiece uses models available through your VS Code account; it does not supply a subscription or bypass model quotas.
+3. Click the **Eyepiece** eye icon in the activity bar and pick an **AI provider**: GitHub Copilot, an Anthropic or OpenAI API key (stored in VS Code secret storage, billed by the provider), Codex with your ChatGPT plan, or Claude Code (personal use). Eyepiece does not supply a subscription or bypass model quotas.
 4. Open a saved `.rs` file and click the **eye button** in the editor title bar, or **Open Eyepiece** in the sidebar. The Eyepiece panel opens to the right. Choose a model the first time (it is remembered until VS Code restarts) and grant VS Code's model-access consent.
 5. Pick a language from the searchable **Language** dropdown in the panel or the sidebar. Switching retranslates from the Rust; earlier drafts stay available.
 6. Make your change either way: type directly in the panel editor and click **Preview Rust Change**, or describe it in the box at the bottom and click **Send**. Neither changes Rust.
@@ -23,9 +23,9 @@ For a dependency-free example, open `fixtures/rust` as the workspace. Ask the Py
 
 - Any saved local text file, up to 100,000 characters, viewed as a plain-English explanation or in Python, Rust, TypeScript, JavaScript, Go, Java, C#, C++, C, Ruby, PHP, Swift, or Kotlin. A file set to its own language shows English.
 - Apply runs Cargo for Rust, `go test` for Go, `npm test` for JavaScript and TypeScript with a test script, and `pytest` for Python with a `pyproject.toml`, `pytest.ini`, or `setup.cfg`. Anything else applies with no checks, and Eyepiece says so. Translations can be inaccurate, especially between very different languages.
-- Copilot is the only implemented model adapter. ChatGPT and Claude Code settings are reserved and explicitly rejected.
+- Codex and Claude Code run your own installed program with your own sign-in, in an empty temporary folder. Claude Code has all tools off. Codex runs in a read-only sandbox. Check each provider's terms before depending on subscription access, especially in anything you distribute.
 - No background requests. Translation cache is bounded and lives only for this VS Code session; saved drafts and baseline metadata persist in extension global storage.
-- The model sees the selected source, and for proposals the original and edited Python. No repository-wide context is sent. No telemetry or Eyepiece server.
+- The selected provider sees the source file, and for proposals the original and edited view. No repository-wide context is sent. No telemetry or Eyepiece server.
 - Drafts contain source code in plaintext in VS Code's extension storage. Delete them there when no longer needed. Uninstalling may not remove that storage.
 - Structured responses are validated; invalid ranges, overlap, ambiguity, stale revisions, source drift, or changed drafts block Apply. Clicking a linked declaration in an unedited view jumps to its Rust; links stop working once the view is edited.
 - Proposals that edit tests need a decision: `#[cfg(test)]` or `#[test]` code in Rust, and any edit mentioning test, assert, or expect in other languages. The exception is editing tests in the view yourself or mentioning tests in your request. Tests elsewhere, such as a `tests/` folder, are outside the single file Eyepiece edits. Recognising your own test edits is a word-based check, so an unrecognised one simply asks you to decide.

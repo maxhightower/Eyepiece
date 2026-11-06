@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
-import { languageOptions } from './config';
+import { languageOptions, providerIds, providerLabels, ProviderId } from './config';
 
-interface SidebarState { enabled: boolean; language: string; panelOpen: boolean; previewReady: boolean }
-type Inbound = { type: 'ready' } | { type: 'command'; id: string } | { type: 'language'; id: string };
-const allowed = new Set(['eyepiece.enableCopilot', 'eyepiece.translate', 'eyepiece.reopenDraft', 'eyepiece.preview', 'eyepiece.apply', 'eyepiece.openSettings']);
+interface SidebarState { provider: ProviderId; language: string; panelOpen: boolean; previewReady: boolean }
+type Inbound = { type: 'ready' } | { type: 'command'; id: string } | { type: 'language'; id: string } | { type: 'provider'; id: string };
+const allowed = new Set(['eyepiece.setApiKey', 'eyepiece.chooseModel', 'eyepiece.translate', 'eyepiece.reopenDraft', 'eyepiece.preview', 'eyepiece.apply', 'eyepiece.openSettings']);
 
 /** Sidebar view. It holds the language dropdown, which VS Code's built-in view buttons cannot show. */
 export class EyepieceSidebar implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
-  constructor(private readonly extensionUri: vscode.Uri, private readonly state: () => SidebarState, private readonly setLanguage: (id: string) => Thenable<void>) {}
+  constructor(private readonly extensionUri: vscode.Uri, private readonly state: () => SidebarState, private readonly setLanguage: (id: string) => Thenable<void>, private readonly setProvider: (id: string) => Thenable<void>) {}
   resolveWebviewView(view: vscode.WebviewView): void {
     const media = vscode.Uri.joinPath(this.extensionUri, 'media');
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
@@ -21,10 +21,11 @@ export class EyepieceSidebar implements vscode.WebviewViewProvider {
     view.webview.onDidReceiveMessage(async (message: Inbound) => {
       if (message.type === 'ready') this.update();
       if (message.type === 'language') await this.setLanguage(message.id);
+      if (message.type === 'provider') await this.setProvider(message.id);
       if (message.type === 'command' && allowed.has(message.id)) await vscode.commands.executeCommand(message.id);
     });
     view.onDidDispose(() => { this.view = undefined; });
     this.view = view;
   }
-  update(): void { void this.view?.webview.postMessage({ ...this.state(), languages: languageOptions() }); }
+  update(): void { void this.view?.webview.postMessage({ ...this.state(), languages: languageOptions(), providers: providerIds.filter(id => id !== 'none').map(id => ({ id, label: providerLabels[id] })) }); }
 }
