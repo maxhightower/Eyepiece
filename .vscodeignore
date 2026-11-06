@@ -2,7 +2,7 @@
 !package.json
 !README.md
 !CHANGELOG.md
-!out/src/**
+!out/src/**/*.js
 !fixtures/rust/Cargo.toml
 !fixtures/rust/Cargo.lock
 !fixtures/rust/src/**

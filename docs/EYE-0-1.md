@@ -11,8 +11,10 @@ EYE-1: Copilot Language Model API adapter, Rust → editable Python views, persi
 - TypeScript strict compilation: passed locally.
 - Eight unit tests: passed locally (config, cancellation, unavailable providers, schema/ranges/overlap/Unicode/stale revisions/ambiguity).
 - Three Rust fixture tests: passed locally.
+- Headless API simulation: passed locally through the full integration scenario with real filesystem and Cargo subprocesses; simulated VS Code APIs and controlled model responses. This does not replace desktop acceptance.
+- VSIX build and static contents inspection: passed locally; 17 files, no source maps/test/dependency payload.
 - Desktop integration suite: covers activation/commands/sample isolation, Copilot adapter streaming/error handling with controlled responses, draft save isolation, cache, diff preview, declined Apply, source/draft conflicts, cancellation, real Cargo failure, real successful Cargo check/test, and refresh.
-- The local sandbox cannot start VS Code Electron (SIGSEGV before extension activation), even with a working virtual display. GitHub Actions is the desktop/packaged acceptance gate; consult its result for this commit.
+- The local sandbox cannot start VS Code Electron (SIGSEGV before extension activation), even with a working virtual display. GitHub Actions is configured as the desktop/packaged acceptance gate. The first run (42232436543) failed before any steps executed, with no job logs. The connector cannot expose its diagnostic annotations, and the browser is not signed in to this private repository. The startup cause is unconfirmed; desktop/packaged execution remains blocked.
 - No signed-in Copilot session is available in the build environment. Live authentication, quota behavior, and actual model translation quality remain a manual acceptance gate. Automated tests never claim a live AI request.
 
 ## Manual live acceptance
