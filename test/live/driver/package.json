@@ -1,0 +1,9 @@
+{
+  "name": "eyepiece-live-driver",
+  "publisher": "eyepiece-test",
+  "version": "0.0.0",
+  "private": true,
+  "engines": { "vscode": "^1.95.0" },
+  "main": "./main.js",
+  "activationEvents": ["onStartupFinished"]
+}

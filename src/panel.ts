@@ -1,0 +1,212 @@
+import * as vscode from 'vscode';
+import { randomBytes } from 'node:crypto';
+import { Workflow } from './workflow';
+import { DiffLine, lineDiff } from './core';
+import { TranslationResult } from './providers/types';
+import { languageOptions, targetLanguages } from './config';
+
+interface Review { diff: DiffLine[]; explanation: string }
+type Inbound =
+  | { type: 'ready' } | { type: 'cancel' } | { type: 'preview' } | { type: 'apply' } | { type: 'reject' } | { type: 'drafts' }
+  | { type: 'edit'; text: string } | { type: 'ask'; request: string } | { type: 'language'; id: string } | { type: 'jump'; offset: number };
+
+/** The Eyepiece app panel. All safety checks stay in Workflow; this class only drives it and renders state. */
+export class EyepiecePanel implements vscode.Disposable {
+  private panel: vscode.WebviewPanel | undefined;
+  private draft: vscode.TextDocument | undefined;
+  private baseline: TranslationResult | undefined;
+  private sourceUri: vscode.Uri | undefined;
+  private draftLanguage: string | undefined;
+  private review: Review | undefined;
+  private controller: AbortController | undefined;
+  private status = ''; private error = ''; private busy = false; private cancellable = false;
+  private log_ = '';
+  private queue: Promise<void> = Promise.resolve();
+  private markReady: () => void = () => undefined;
+  /** Resolves when the webview script has loaded and its editor is mounted. */
+  ready: Promise<void> = new Promise(resolve => { this.markReady = resolve; });
+  private readonly subscriptions: vscode.Disposable[] = [];
+
+  constructor(private readonly extensionUri: vscode.Uri, private readonly workflow: Workflow,
+    private readonly language: () => string, private readonly setLanguage: (id: string) => Thenable<void>,
+    private readonly onChange: () => void = () => undefined) {
+    this.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(event => this.followSource(event)));
+  }
+  dispose(): void { this.controller?.abort(); this.panel?.dispose(); for (const item of this.subscriptions) item.dispose(); }
+  get isOpen(): boolean { return this.panel !== undefined; }
+  get hasReview(): boolean { return this.review !== undefined; }
+  get text(): string | undefined { return this.draft?.getText(); }
+  get lastError(): string { return this.error; }
+  get draftUri(): vscode.Uri | undefined { return this.draft?.uri; }
+  get linkCount(): number { return this.baseline?.mappings.length ?? 0; }
+
+  private ensure(): vscode.WebviewPanel {
+    if (this.panel) return this.panel;
+    const media = vscode.Uri.joinPath(this.extensionUri, 'media');
+    const panel = vscode.window.createWebviewPanel('eyepiece.panel', 'Eyepiece', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false }, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media] });
+    panel.iconPath = { light: vscode.Uri.joinPath(media, 'eyepiece-light.svg'), dark: vscode.Uri.joinPath(media, 'eyepiece-dark.svg') };
+    const nonce = randomBytes(16).toString('hex'), csp = panel.webview.cspSource;
+    const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, name));
+    panel.webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${csp}; style-src ${csp} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${asset('panel.css')}"><title>Eyepiece</title></head><body><div id="app"></div><script nonce="${nonce}" src="${asset('panel.js')}"></script></body></html>`;
+    panel.webview.onDidReceiveMessage((message: Inbound) => {
+      if (message.type === 'cancel') { this.controller?.abort(); return; }
+      this.queue = this.queue.then(() => this.receive(message)).catch(error => this.fail(error));
+    });
+    panel.onDidDispose(() => {
+      this.controller?.abort(); this.panel = undefined; this.draft = undefined; this.sourceUri = undefined; this.review = undefined;
+      this.ready = new Promise(resolve => { this.markReady = resolve; });
+      this.onChange();
+    });
+    this.panel = panel; this.onChange();
+    return panel;
+  }
+  private async receive(message: Inbound): Promise<void> {
+    switch (message.type) {
+      case 'ready': this.markReady(); this.publish(true); break;
+      case 'edit': await this.edit(message.text); break;
+      case 'ask': await this.ask(message.request); break;
+      case 'preview': await this.preview(); break;
+      case 'apply': await this.apply(); break;
+      case 'reject': this.reject(); break;
+      case 'drafts': await this.openDrafts(); break;
+      case 'language': if (message.id !== this.language()) await this.setLanguage(message.id); break;
+      case 'jump': await this.jump(message.offset); break;
+    }
+  }
+  private publish(withText = false): void {
+    void this.panel?.webview.postMessage({ type: 'state', status: this.status, error: this.error, busy: this.busy, cancellable: this.cancellable,
+      language: this.draftLanguage ?? this.language(), languages: languageOptions(),
+      hasDraft: !!this.draft, review: this.review, notes: this.baseline?.caveats ?? [], log: this.log_, text: withText ? this.draft?.getText() ?? '' : undefined });
+    this.onChange();
+  }
+  log(text: string): void {
+    this.log_ = (this.log_ + text).slice(-20000);
+    void this.panel?.webview.postMessage({ type: 'log', text: this.log_ });
+  }
+  private fail(error: unknown): void {
+    if (error instanceof vscode.CancellationError || (error instanceof Error && error.name === 'AbortError')) this.error = '';
+    else this.error = error instanceof Error ? error.message : String(error);
+    this.publish();
+  }
+  private async run(status: string, cancellable: boolean, operation: (signal: AbortSignal) => Promise<string>): Promise<void> {
+    if (this.busy) return;
+    const controller = new AbortController();
+    this.controller = controller; this.busy = true; this.cancellable = cancellable; this.status = status; this.error = '';
+    this.publish();
+    try { this.status = await this.workflow.exclusive(() => operation(controller.signal)); }
+    catch (error) { this.status = ''; this.fail(error); }
+    finally {
+      if (!this.workflow.hasPendingChange) this.review = undefined;
+      this.controller = undefined; this.busy = false; this.cancellable = false;
+      this.publish();
+    }
+  }
+  private async load(draft: vscode.TextDocument): Promise<void> {
+    const session = await this.workflow.session(draft);
+    this.draft = draft; this.baseline = session.baseline; this.review = undefined;
+    this.sourceUri = vscode.Uri.parse(session.source.uri); this.draftLanguage = session.targetLanguage ?? 'python';
+    this.workflow.remember(draft);
+    const name = this.sourceUri.path.split('/').pop();
+    if (this.panel) this.panel.title = `Eyepiece: ${name}`;
+    this.publish(true);
+  }
+  private label(id = this.language()): string { return targetLanguages[id as keyof typeof targetLanguages]?.label ?? id; }
+  private async translate(source: vscode.TextDocument): Promise<void> {
+    const language = this.language();
+    this.sourceUri = source.uri;
+    await this.run(`Translating to ${this.label(language)}…`, true, async signal => {
+      const uri = await this.workflow.translate(source, signal, { language, reveal: false });
+      await this.load(await vscode.workspace.openTextDocument(uri));
+      return '';
+    });
+  }
+  /** Eye button: reveal the panel beside the file, translating unless this view is already current. */
+  async open(source: vscode.TextDocument): Promise<void> {
+    const existing = this.panel;
+    this.ensure();
+    if (existing) existing.reveal(existing.viewColumn, false);
+    if (this.draft && this.sourceUri?.toString() === source.uri.toString() && this.draftLanguage === this.language()) return;
+    await this.translate(source);
+  }
+  async languageChanged(): Promise<void> {
+    this.publish();
+    if (!this.panel || !this.sourceUri || this.draftLanguage === this.language()) return;
+    await this.translate(await vscode.workspace.openTextDocument(this.sourceUri));
+  }
+  private async writeDraft(text: string): Promise<void> {
+    const draft = this.draft;
+    if (!draft || draft.getText() === text) return;
+    const change = new vscode.WorkspaceEdit();
+    change.replace(draft.uri, new vscode.Range(draft.positionAt(0), draft.positionAt(draft.getText().length)), text);
+    if (!await vscode.workspace.applyEdit(change) || !await draft.save()) throw new Error('Could not save the draft.');
+  }
+  /** Direct typing in the panel editor. Any edit invalidates a reviewed proposal. */
+  async edit(text: string): Promise<void> {
+    if (!this.draft || this.draft.getText() === text) return;
+    await this.writeDraft(text);
+    this.workflow.discard(this.draft);
+    if (this.review) { this.review = undefined; this.publish(); }
+  }
+  private async propose(signal: AbortSignal): Promise<string> {
+    const draft = this.draft!;
+    await this.workflow.preview(draft, signal, { showDiff: false });
+    const review = this.workflow.review(draft)!;
+    this.review = { diff: lineDiff(review.before, review.after), explanation: review.explanation };
+    return 'Review the Rust change below. Nothing has been applied.';
+  }
+  async preview(): Promise<void> {
+    if (!this.draft) return;
+    await this.run('Working out the Rust change…', true, signal => this.propose(signal));
+  }
+  /** Request box: the model revises the view, then the normal review flow takes over. */
+  async ask(request: string): Promise<void> {
+    if (!this.draft || !request.trim()) return;
+    await this.run('Working on your request…', true, async signal => {
+      const text = await this.workflow.revise(this.draft!, request.trim(), signal);
+      await this.writeDraft(text);
+      this.workflow.discard(this.draft!);
+      this.publish(true);
+      this.status = 'Working out the Rust change…'; this.publish();
+      return await this.propose(signal);
+    });
+  }
+  async apply(): Promise<void> {
+    if (!this.draft || !this.review) return;
+    this.log_ = '';
+    await this.run('Applying and running Cargo…', false, async signal => {
+      if (!await this.workflow.apply(this.draft!, signal, { reveal: false })) return '';
+      await this.load((await this.workflow.selectedDraft())!);
+      return 'Applied. cargo check and cargo test passed.';
+    });
+  }
+  reject(): void {
+    if (this.draft) this.workflow.discard(this.draft);
+    this.review = undefined; this.status = ''; this.publish();
+  }
+  async openDrafts(): Promise<void> {
+    this.ensure();
+    await this.run('', false, async () => {
+      const draft = await this.workflow.reopen({ reveal: false });
+      if (draft) await this.load(draft);
+      return '';
+    });
+  }
+  /** Links are only exact against the unedited view. */
+  private get linksValid(): boolean { return !!this.baseline && this.draft?.getText() === this.baseline.text; }
+  async jump(offset: number): Promise<void> {
+    if (!this.linksValid || !this.sourceUri) return;
+    const link = this.baseline!.mappings.filter(item => item.viewStart <= offset && offset <= item.viewEnd).sort((a, b) => (a.viewEnd - a.viewStart) - (b.viewEnd - b.viewStart))[0];
+    if (!link) return;
+    const source = await vscode.workspace.openTextDocument(this.sourceUri);
+    const column = vscode.window.visibleTextEditors.find(editor => editor.document.uri.toString() === source.uri.toString())?.viewColumn ?? vscode.ViewColumn.One;
+    await vscode.window.showTextDocument(source, { viewColumn: column, preserveFocus: true, selection: new vscode.Range(source.positionAt(link.sourceStart), source.positionAt(link.sourceEnd)) });
+  }
+  private followSource(event: vscode.TextEditorSelectionChangeEvent): void {
+    if (!this.panel || !this.linksValid || event.textEditor.document.uri.toString() !== this.sourceUri?.toString()) return;
+    const offset = event.textEditor.document.offsetAt(event.selections[0]!.active);
+    const link = this.baseline!.mappings.find(item => item.sourceStart <= offset && offset <= item.sourceEnd);
+    if (link) void this.panel.webview.postMessage({ type: 'highlight', from: link.viewStart, to: link.viewEnd });
+  }
+}
