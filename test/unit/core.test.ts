@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asksForTestChange, editsTestCode, rustTestRanges, splitTestEdits, lineDiff, locateLinks, locateReplacements, parseRevision, revision, parseTranslation, parseProposal, applyProposal } from '../../src/core';
+import { asksForTestChange, editsTestCode, linkBlocks, rustTestRanges, splitTestEdits, lineDiff, locateLinks, locateReplacements, parseRevision, revision, parseTranslation, parseProposal, applyProposal } from '../../src/core';
 const source = { uri: 'file:///sample.rs', language: 'rust', text: 'abc😀xyz', revision: revision('abc😀xyz') };
 const proposal = (replacements: unknown[]) => ({sourceRevision:source.revision, replacements, explanation:'change', unresolvedChoices:[]});
 test('valid edits use UTF-16 offsets and apply in source order', () => {
@@ -100,4 +100,23 @@ test('only test code and explicit requests count as asking for test changes', ()
   assert.equal(editsTestCode('a\n', 'a\nlatest = 1\n'), false);
   assert.equal(asksForTestChange('update the tests too'), true);
   assert.equal(asksForTestChange('skip the latest scores'), false);
+});
+test('link blocks span whole items on both sides and survive edits', () => {
+  const rust = 'fn a() {\n  1\n}\n\nfn b() {\n  2\n}\n';
+  const view = '# a\ndef a():\n  return 1\n\n# b\ndef b():\n  return 2\n';
+  const links = [{ sourceStart: 0, sourceEnd: 8, viewStart: 0, viewEnd: 3 }, { sourceStart: rust.indexOf('fn b'), sourceEnd: rust.indexOf('fn b') + 8, viewStart: view.indexOf('# b'), viewEnd: view.indexOf('# b') + 3 }];
+  const blocks = linkBlocks(links, view, view, rust);
+  assert.equal(view.slice(blocks[0]!.view.from, blocks[0]!.view.to), '# a\ndef a():\n  return 1');
+  assert.equal(rust.slice(blocks[0]!.source.from, blocks[0]!.source.to), 'fn a() {\n  1\n}');
+  assert.equal(rust.slice(blocks[1]!.source.from, blocks[1]!.source.to), 'fn b() {\n  2\n}');
+  const edited = '# added\n' + view.replace('return 1', 'return 100');
+  const moved = linkBlocks(links, view, edited, rust);
+  assert.equal(edited.slice(moved[1]!.view.from, moved[1]!.view.from + 3), '# b', 'blocks follow the text');
+  assert.ok(edited.slice(moved[0]!.view.from, moved[0]!.view.to).includes('return 100'));
+  assert.equal(linkBlocks(links, view, view.replace('# a\n', ''), rust).length, 1, 'a removed anchor drops out');
+  assert.deepEqual(linkBlocks([], view, view, rust), []);
+});
+test('repeated anchors stay in order', () => {
+  const view = 'x\nx\n', links = [{ sourceStart: 0, sourceEnd: 1, viewStart: 0, viewEnd: 1 }, { sourceStart: 2, sourceEnd: 3, viewStart: 2, viewEnd: 3 }];
+  assert.deepEqual(linkBlocks(links, view, view, 'a b').map(block => block.view.from), [0, 2]);
 });

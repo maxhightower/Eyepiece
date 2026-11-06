@@ -1,14 +1,14 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import { Workflow } from './workflow';
-import { asksForTestChange, DiffLine, editsTestCode, lineDiff } from './core';
+import { asksForTestChange, DiffLine, editsTestCode, LinkBlock, lineDiff, linkBlocks } from './core';
 import { TranslationResult } from './providers/types';
 import { LanguageOption, languageOptions, targetLanguages } from './config';
 
 interface Review { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }
 type Inbound =
   | { type: 'ready' } | { type: 'cancel' } | { type: 'preview' } | { type: 'apply'; tests?: 'allow' | 'omit' } | { type: 'reject' } | { type: 'drafts' }
-  | { type: 'edit'; text: string } | { type: 'ask'; request: string } | { type: 'language'; id: string } | { type: 'model'; id: string } | { type: 'jump'; offset: number };
+  | { type: 'edit'; text: string } | { type: 'ask'; request: string } | { type: 'language'; id: string } | { type: 'model'; id: string } | { type: 'link'; index: number | null; scroll: boolean };
 
 /** The Eyepiece app panel. All safety checks stay in Workflow; this class only drives it and renders state. */
 export class EyepiecePanel implements vscode.Disposable {
@@ -18,6 +18,10 @@ export class EyepiecePanel implements vscode.Disposable {
   private sourceUri: vscode.Uri | undefined;
   private draftLanguage: string | undefined;
   private review: Review | undefined;
+  private sourceText = '';
+  private blocks: LinkBlock[] = [];
+  private linkDecoration: vscode.TextEditorDecorationType | undefined;
+  activeLink: number | null = null;
   /** Intent only comes from the user: their typing or their request, never a model rewrite of the view. */
   private testsRequested = false;
   private controller: AbortController | undefined;
@@ -31,11 +35,11 @@ export class EyepiecePanel implements vscode.Disposable {
 
   constructor(private readonly extensionUri: vscode.Uri, private readonly workflow: Workflow,
     private readonly language: () => string, private readonly setLanguage: (id: string) => Thenable<void>,
-    private readonly onChange: () => void = () => undefined, private readonly providerLabel: () => string = () => '',
+    private readonly onChange: () => void = () => undefined,
     private readonly modelChoice: () => { models: LanguageOption[]; model: string } = () => ({ models: [], model: '' }), private readonly setModel: (id: string) => void = () => undefined) {
     this.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(event => this.followSource(event)));
   }
-  dispose(): void { this.controller?.abort(); this.panel?.dispose(); for (const item of this.subscriptions) item.dispose(); }
+  dispose(): void { this.controller?.abort(); this.panel?.dispose(); this.linkDecoration?.dispose(); for (const item of this.subscriptions) item.dispose(); }
   get isOpen(): boolean { return this.panel !== undefined; }
   get hasReview(): boolean { return this.review !== undefined; }
   get text(): string | undefined { return this.draft?.getText(); }
@@ -43,7 +47,7 @@ export class EyepiecePanel implements vscode.Disposable {
   get statusText(): string { return this.status; }
   get needsTestDecision(): boolean { return this.review?.tests?.blocked === true; }
   get draftUri(): vscode.Uri | undefined { return this.draft?.uri; }
-  get linkCount(): number { return this.baseline?.mappings.length ?? 0; }
+  get linkCount(): number { return this.blocks.length; }
 
   private ensure(): vscode.WebviewPanel {
     if (this.panel) return this.panel;
@@ -57,6 +61,8 @@ export class EyepiecePanel implements vscode.Disposable {
 <link rel="stylesheet" href="${asset('panel.css')}"><title>Eyepiece</title></head><body><div id="app"></div><script nonce="${nonce}" src="${asset('panel.js')}"></script></body></html>`;
     panel.webview.onDidReceiveMessage((message: Inbound) => {
       if (message.type === 'cancel') { this.controller?.abort(); return; }
+      // Highlighting stays live while a request runs, so it skips the queue.
+      if (message.type === 'link') { void this.linkTo(message.index, message.scroll); return; }
       this.queue = this.queue.then(() => this.receive(message)).catch(error => this.fail(error));
     });
     panel.onDidDispose(() => {
@@ -78,14 +84,13 @@ export class EyepiecePanel implements vscode.Disposable {
       case 'drafts': await this.openDrafts(); break;
       case 'language': if (message.id !== this.language()) await this.setLanguage(message.id); break;
       case 'model': this.setModel(message.id); break;
-      case 'jump': await this.jump(message.offset); break;
     }
   }
   private publish(withText = false): void {
-    // The provider receives the code, so the panel always says which one is active.
+    this.refreshBlocks();
     void this.panel?.webview.postMessage({ type: 'state', status: this.status, error: this.error, busy: this.busy, cancellable: this.cancellable,
       language: this.draftLanguage ?? this.language(), languages: languageOptions(),
-      provider: this.providerLabel(), ...this.modelChoice(), hasDraft: !!this.draft, review: this.review, notes: this.baseline?.caveats ?? [], log: this.log_, text: withText ? this.draft?.getText() ?? '' : undefined });
+      ...this.modelChoice(), blocks: this.blocks.map(block => block.view), hasDraft: !!this.draft, review: this.review, notes: this.baseline?.caveats ?? [], log: this.log_, text: withText ? this.draft?.getText() ?? '' : undefined });
     this.onChange();
   }
   refresh(): void { this.publish(); }
@@ -113,7 +118,7 @@ export class EyepiecePanel implements vscode.Disposable {
   }
   private async load(draft: vscode.TextDocument): Promise<void> {
     const session = await this.workflow.session(draft);
-    this.draft = draft; this.baseline = session.baseline; this.review = undefined; this.testsRequested = false;
+    this.draft = draft; this.baseline = session.baseline; this.sourceText = session.source.text; this.review = undefined; this.testsRequested = false;
     this.sourceUri = vscode.Uri.parse(session.source.uri); this.draftLanguage = session.targetLanguage ?? 'python';
     this.workflow.remember(draft);
     const name = this.sourceUri.path.split('/').pop();
@@ -163,7 +168,7 @@ export class EyepiecePanel implements vscode.Disposable {
     if (editsTestCode(this.draft.getText(), text)) this.testsRequested = true;
     await this.writeDraft(text);
     this.workflow.discard(this.draft);
-    if (this.review) { this.review = undefined; this.publish(); }
+    this.review = undefined; this.publish();
   }
   private async propose(signal: AbortSignal): Promise<string> {
     const draft = this.draft!;
@@ -216,20 +221,38 @@ export class EyepiecePanel implements vscode.Disposable {
       return '';
     });
   }
-  /** Links are only exact against the unedited view. */
-  private get linksValid(): boolean { return !!this.baseline && this.draft?.getText() === this.baseline.text; }
-  async jump(offset: number): Promise<void> {
-    if (!this.linksValid || !this.sourceUri) return;
-    const link = this.baseline!.mappings.filter(item => item.viewStart <= offset && offset <= item.viewEnd).sort((a, b) => (a.viewEnd - a.viewStart) - (b.viewEnd - b.viewStart))[0];
-    if (!link) return;
-    const source = await vscode.workspace.openTextDocument(this.sourceUri);
-    const column = vscode.window.visibleTextEditors.find(editor => editor.document.uri.toString() === source.uri.toString())?.viewColumn ?? vscode.ViewColumn.One;
-    await vscode.window.showTextDocument(source, { viewColumn: column, preserveFocus: true, selection: new vscode.Range(source.positionAt(link.sourceStart), source.positionAt(link.sourceEnd)) });
+  private get sourceDocument(): vscode.TextDocument | undefined {
+    return vscode.workspace.textDocuments.find(doc => doc.uri.toString() === this.sourceUri?.toString());
+  }
+  /** Blocks only hold while the source still matches what was translated. */
+  private refreshBlocks(): void {
+    const source = this.sourceDocument;
+    this.blocks = this.baseline && this.draft && (!source || source.getText() === this.sourceText) ? linkBlocks(this.baseline.mappings, this.baseline.text, this.draft.getText(), this.sourceText) : [];
+  }
+  private markSource(block: LinkBlock | undefined): vscode.Range | undefined {
+    const source = this.sourceDocument;
+    const range = block && source && new vscode.Range(source.positionAt(block.source.from), source.positionAt(block.source.to));
+    this.linkDecoration ??= vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'), overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.findMatchForeground'), overviewRulerLane: vscode.OverviewRulerLane.Center });
+    for (const editor of vscode.window.visibleTextEditors) if (editor.document === source) editor.setDecorations(this.linkDecoration, range ? [range] : []);
+    return range;
+  }
+  /** Hovering highlights the matching block. Clicking also scrolls the source to it. */
+  async linkTo(index: number | null, scroll = false): Promise<void> {
+    const block = index === null ? undefined : this.blocks[index];
+    this.activeLink = block ? index : null;
+    if (block && scroll && this.sourceUri && !vscode.window.visibleTextEditors.some(editor => editor.document.uri.toString() === this.sourceUri!.toString())) {
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(this.sourceUri), { viewColumn: vscode.ViewColumn.One, preserveFocus: true });
+    }
+    const range = this.markSource(block);
+    if (range && scroll) for (const editor of vscode.window.visibleTextEditors) if (editor.document === this.sourceDocument) editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
   }
   private followSource(event: vscode.TextEditorSelectionChangeEvent): void {
-    if (!this.panel || !this.linksValid || event.textEditor.document.uri.toString() !== this.sourceUri?.toString()) return;
+    if (!this.panel || event.textEditor.document.uri.toString() !== this.sourceUri?.toString()) return;
+    this.refreshBlocks();
     const offset = event.textEditor.document.offsetAt(event.selections[0]!.active);
-    const link = this.baseline!.mappings.find(item => item.sourceStart <= offset && offset <= item.sourceEnd);
-    if (link) void this.panel.webview.postMessage({ type: 'highlight', from: link.viewStart, to: link.viewEnd });
+    const index = this.blocks.findIndex(block => block.source.from <= offset && offset <= block.source.to);
+    this.activeLink = index < 0 ? null : index;
+    this.markSource(this.blocks[index]);
+    void this.panel.webview.postMessage({ type: 'focus', index: this.activeLink, scroll: true });
   }
 }

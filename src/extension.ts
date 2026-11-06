@@ -3,7 +3,7 @@ import { Workflow } from './workflow';
 import { EyepiecePanel } from './panel';
 import { EyepieceSidebar } from './sidebar';
 import { ProviderSelector } from './providers/select';
-import { describeStatus, LanguageOption, normalizeSettings, pickModel, ProviderId, providerLabels } from './config';
+import { describeStatus, LanguageOption, normalizeSettings, pickModel, ProviderId } from './config';
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Eyepiece');
   const badge = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10);
@@ -44,7 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const updateButtons = () => {
     sidebar.update();
   };
-  const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons, () => providerLabels[settings().provider], () => ({ models, model: pickModel(ids(), selector.savedModel(settings().provider), panelModel) ?? '' }), id => { panelModel = id; panel.refresh(); });
+  const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons, () => ({ models, model: pickModel(ids(), selector.savedModel(settings().provider), panelModel) ?? '' }), id => { panelModel = id; panel.refresh(); });
   const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ provider: settings().provider as ProviderId, language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview && !panel.needsTestDecision, models, model: defaultModel(), modelError }), setLanguage, setProvider, setDefaultModel, refreshModels);
   const isSource = (doc: vscode.TextDocument) => doc.uri.scheme === 'file';
   context.subscriptions.push(output, badge, workflow, panel,
