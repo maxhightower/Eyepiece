@@ -1,0 +1,12 @@
+**/*
+!package.json
+!README.md
+!CHANGELOG.md
+!out/src/**
+!fixtures/rust/Cargo.toml
+!fixtures/rust/Cargo.lock
+!fixtures/rust/src/**
+!docs/welcome.md
+**/*.map
+
+out/**/*.map

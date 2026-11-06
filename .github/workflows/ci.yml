@@ -1,0 +1,24 @@
+name: Eyepiece checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: npm ci
+      - run: npm run check
+      - run: xvfb-run -a npm run test:host
+      - run: npm run package
+      - run: xvfb-run -a npm run verify:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eyepiece-vsix
+          path: eyepiece-*.vsix

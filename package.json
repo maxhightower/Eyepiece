@@ -1,0 +1,112 @@
+{
+  "name": "eyepiece",
+  "displayName": "Eyepiece",
+  "description": "View Rust as editable Python, review proposed Rust changes, and apply with Cargo checks.",
+  "version": "0.0.1",
+  "publisher": "maxhightower",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maxhightower/Eyepiece.git"
+  },
+  "main": "./out/src/extension.js",
+  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Welcome and sample only; model requests, source edits, and Cargo checks require workspace trust."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "EYE-1 requires local Rust files and Cargo."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "eyepiece.openWelcome",
+        "title": "Eyepiece: Open Welcome"
+      },
+      {
+        "command": "eyepiece.openSample",
+        "title": "Eyepiece: Open Rust Sample"
+      },
+      {
+        "command": "eyepiece.showStatus",
+        "title": "Eyepiece: Show Status"
+      },
+      {
+        "command": "eyepiece.openSettings",
+        "title": "Eyepiece: Open Settings"
+      },
+      {
+        "command": "eyepiece.translate",
+        "title": "Eyepiece: Open Python view"
+      },
+      {
+        "command": "eyepiece.preview",
+        "title": "Eyepiece: Preview source change"
+      },
+      {
+        "command": "eyepiece.apply",
+        "title": "Eyepiece: Apply reviewed source change"
+      },
+      {
+        "command": "eyepiece.reopenDraft",
+        "title": "Eyepiece: Reopen saved draft"
+      }
+    ],
+    "configuration": {
+      "title": "Eyepiece",
+      "properties": {
+        "eyepiece.targetLanguage": {
+          "type": "string",
+          "default": "python",
+          "description": "Preferred language for future translated views. EYE-0 does not translate code."
+        },
+        "eyepiece.provider": {
+          "type": "string",
+          "enum": [
+            "none",
+            "copilot",
+            "chatgpt",
+            "claudeCode"
+          ],
+          "default": "none",
+          "description": "Select Copilot to enable EYE-1 model requests. No separate Eyepiece account.",
+          "enumDescriptions": [
+            "Disabled",
+            "Use GitHub Copilot through the VS Code Language Model API",
+            "Planned; not implemented",
+            "Planned; not implemented"
+          ]
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "test:unit": "npm run compile && node --test out/test/unit/*.test.js",
+    "test:host": "npm run compile && node scripts/test-host.cjs",
+    "test:fixture": "cargo test --locked --manifest-path fixtures/rust/Cargo.toml",
+    "check": "npm run test:unit && npm run test:fixture",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --allow-missing-repository --skip-license --out eyepiece-0.0.1.vsix",
+    "verify:package": "python3 scripts/verify-package.py"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.95.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.1.0",
+    "typescript": "5.7.3"
+  }
+}
