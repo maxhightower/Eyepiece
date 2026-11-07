@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ProposedEdit, SourceSnapshot, TranslationResult } from './providers/types';
+import { ProposedEdit, SourceSnapshot, TranslationResult, ViewRevision } from './providers/types';
 export const revision = (text: string): string => createHash('sha256').update(text).digest('hex');
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected JSON object');
@@ -22,6 +22,18 @@ export function parseTranslation(value: unknown, source: SourceSnapshot): Transl
     return result;
   });
   return { text, sourceRevision: source.revision, mappings, caveats: strings(v.caveats) };
+}
+/** Models quote the text to replace because they miscount offsets. Quotes must match exactly one place in the source. */
+export function locateReplacements(value: unknown, source: SourceSnapshot): unknown {
+  const v = object(value);
+  if (!Array.isArray(v.replacements)) return v;
+  const eol = (text: string) => source.text.includes('\r\n') ? text.replace(/\r?\n/g, '\r\n') : text;
+  return { ...v, replacements: v.replacements.map(item => {
+    const e = object(item), find = eol(string(e.find)), start = source.text.indexOf(find);
+    if (!find || start < 0) throw new Error('The proposed change quotes text that is not in the Rust file. Preview again.');
+    if (source.text.includes(find, start + 1)) throw new Error('The proposed change matches more than one place in the Rust file. Preview again.');
+    return { start, end: start + find.length, text: eol(string(e.text)) };
+  }) };
 }
 export function parseProposal(value: unknown, source: SourceSnapshot): ProposedEdit {
   const v = object(value);
@@ -48,4 +60,50 @@ export function applyProposal(source: SourceSnapshot, proposal: ProposedEdit): s
   for (const e of [...valid.replacements].reverse()) text = text.slice(0,e.start)+e.text+text.slice(e.end);
   if (text === source.text) throw new Error('Proposal contains no source changes');
   return text;
+}
+/** Translation links quote both sides, like replacements. Quotes that cannot be found are dropped: links are optional. */
+export function locateLinks(value: unknown, source: SourceSnapshot): unknown {
+  const v = object(value), text = string(v.text);
+  const eol = (quote: string) => source.text.includes('\r\n') ? quote.replace(/\r?\n/g, '\r\n') : quote;
+  const mappings = [];
+  for (const item of Array.isArray(v.links) ? v.links : []) {
+    if (!item || typeof item !== 'object') continue;
+    const link = item as Record<string, unknown>;
+    if (typeof link.source !== 'string' || typeof link.view !== 'string' || !link.source || !link.view) continue;
+    const quote = eol(link.source), sourceStart = source.text.indexOf(quote), viewStart = text.indexOf(link.view);
+    if (sourceStart >= 0 && viewStart >= 0) mappings.push({ sourceStart, sourceEnd: sourceStart + quote.length, viewStart, viewEnd: viewStart + link.view.length });
+  }
+  return { ...v, mappings };
+}
+export function parseRevision(value: unknown): ViewRevision {
+  const v = object(value), text = string(v.text);
+  if (!text.trim()) throw new Error('The model returned an empty view.');
+  return { text, summary: string(v.summary) };
+}
+export interface DiffLine { kind: ' ' | '+' | '-' | '…'; text: string }
+/** Line diff with three lines of context, for rendering a review inside the panel. */
+export function lineDiff(before: string, after: string, context = 3): DiffLine[] {
+  const a = before.split(/\r?\n/), b = after.split(/\r?\n/);
+  let start = 0, endA = a.length, endB = b.length;
+  while (start < endA && start < endB && a[start] === b[start]) start++;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB--; }
+  const n = endA - start, m = endB - start;
+  const table = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) table[i]![j] = a[start + i] === b[start + j] ? table[i + 1]![j + 1]! + 1 : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
+  const lines: DiffLine[] = a.slice(0, start).map(text => ({ kind: ' ', text }));
+  let i = 0, j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[start + i] === b[start + j]) { lines.push({ kind: ' ', text: a[start + i]! }); i++; j++; }
+    else if (i < n && (j === m || table[i + 1]![j]! >= table[i]![j + 1]!)) lines.push({ kind: '-', text: a[start + i++]! });
+    else lines.push({ kind: '+', text: b[start + j++]! });
+  }
+  lines.push(...a.slice(endA).map(text => ({ kind: ' ' as const, text })));
+  const keep = lines.map((line, index) => lines.slice(Math.max(0, index - context), index + context + 1).some(near => near.kind !== ' '));
+  const shown: DiffLine[] = [];
+  lines.forEach((line, index) => {
+    if (keep[index]) shown.push(line);
+    else if (shown.length && shown[shown.length - 1]!.kind !== '…') shown.push({ kind: '…', text: '' });
+  });
+  if (shown[shown.length - 1]?.kind === '…') shown.pop();
+  return shown;
 }

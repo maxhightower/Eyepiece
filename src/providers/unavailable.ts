@@ -1,4 +1,4 @@
-import type { EditRequest, ModelProvider, ProposedEdit, TranslationRequest, TranslationResult } from './types';
+import type { EditRequest, ModelProvider, ProposedEdit, ReviseRequest, TranslationRequest, TranslationResult, ViewRevision } from './types';
 export class UnavailableProvider implements ModelProvider {
   constructor(readonly id: string) {}
   async translate(_request: TranslationRequest, signal: AbortSignal): Promise<TranslationResult> {
@@ -8,5 +8,9 @@ export class UnavailableProvider implements ModelProvider {
   async proposeEdit(_request: EditRequest, signal: AbortSignal): Promise<ProposedEdit> {
     signal.throwIfAborted();
     throw new Error(`Provider '${this.id}' is not implemented in EYE-0. No source was changed.`);
+  }
+  async reviseView(_request: ReviseRequest, signal: AbortSignal): Promise<ViewRevision> {
+    signal.throwIfAborted();
+    throw new Error(`Provider '${this.id}' is not implemented in EYE-0. No request was sent.`);
   }
 }

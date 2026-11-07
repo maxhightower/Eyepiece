@@ -25,6 +25,13 @@ export interface EditRequest extends TranslationRequest {
   baseline: TranslationResult;
   editedText: string;
 }
+export interface ReviseRequest extends EditRequest {
+  changeRequest: string;
+}
+export interface ViewRevision {
+  text: string;
+  summary: string;
+}
 export interface ProposedEdit {
   sourceRevision: string;
   replacements: Array<{ start: number; end: number; text: string }>;
@@ -36,4 +43,6 @@ export interface ModelProvider {
   readonly id: string;
   translate(request: TranslationRequest, signal: AbortSignal): Promise<TranslationResult>;
   proposeEdit(request: EditRequest, signal: AbortSignal): Promise<ProposedEdit>;
+  /** Rewrite the editable view from a plain-language request. Never touches the source. */
+  reviseView(request: ReviseRequest, signal: AbortSignal): Promise<ViewRevision>;
 }

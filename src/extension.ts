@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { Workflow } from './workflow';
+import { EyepiecePanel } from './panel';
+import { EyepieceSidebar } from './sidebar';
 import { CopilotProvider } from './providers/copilot';
 import { describeStatus, normalizeSettings } from './config';
 export function activate(context: vscode.ExtensionContext): void {
@@ -14,7 +16,26 @@ export function activate(context: vscode.ExtensionContext): void {
     badge.tooltip = describeStatus(settings());
     badge.command = 'eyepiece.showStatus';
   };
-  context.subscriptions.push(output, badge,
+  const setLanguage = async (id: string) => { await vscode.workspace.getConfiguration('eyepiece').update('targetLanguage', id, vscode.ConfigurationTarget.Global); };
+  // Workflow and Cargo output also streams into the panel, which replaces the output tab as the place to look.
+  const channel = new Proxy(output, { get(target, key: keyof vscode.OutputChannel) {
+    if (key === 'append' || key === 'appendLine') return (value: string) => { target[key](value); panel.log(key === 'append' ? value : value + '\n'); };
+    if (key === 'show') return () => undefined;
+    const value = target[key];
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  const workflow = new Workflow(vscode.Uri.joinPath(context.globalStorageUri, 'drafts'), channel, async () => {
+    if (settings().provider !== 'copilot') throw new Error('Click Enable Copilot in the Eyepiece sidebar first. ChatGPT and Claude Code adapters are not implemented.');
+    return CopilotProvider.select();
+  });
+  const updateButtons = () => {
+    sidebar.update();
+  };
+  const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons);
+  const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ enabled: settings().provider === 'copilot', language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview }), setLanguage);
+  const isRust = (doc: vscode.TextDocument) => doc.languageId === 'rust' && doc.uri.scheme === 'file';
+  context.subscriptions.push(output, badge, workflow, panel,
+    vscode.window.registerWebviewViewProvider('eyepiece.actions', sidebar),
     vscode.commands.registerCommand('eyepiece.openWelcome', async () => {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(context.extensionUri, 'docs', 'welcome.md'));
       await vscode.window.showTextDocument(doc, { preview: true });
@@ -32,35 +53,22 @@ export function activate(context: vscode.ExtensionContext): void {
       return status;
     }),
     vscode.commands.registerCommand('eyepiece.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:maxhightower.eyepiece')),
-    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('eyepiece')) refresh(); }),
+    vscode.commands.registerCommand('eyepiece.enableCopilot', () => vscode.workspace.getConfiguration('eyepiece').update('provider', 'copilot', vscode.ConfigurationTarget.Global)),
+    vscode.commands.registerCommand('eyepiece.translate', async () => {
+      const active = vscode.window.activeTextEditor?.document;
+      const doc = active && isRust(active) ? active : vscode.window.visibleTextEditors.map(editor => editor.document).find(isRust);
+      if (!doc) { await vscode.window.showErrorMessage('Open a Rust file first.'); return; }
+      await panel.open(doc);
+    }),
+    vscode.commands.registerCommand('eyepiece.preview', () => panel.preview()),
+    vscode.commands.registerCommand('eyepiece.apply', () => panel.apply()),
+    vscode.commands.registerCommand('eyepiece.reopenDraft', () => panel.openDrafts()),
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (!event.affectsConfiguration('eyepiece')) return;
+      refresh(); sidebar.update();
+      if (event.affectsConfiguration('eyepiece.targetLanguage')) void panel.languageChanged();
+    }),
   );
-  const workflow = new Workflow(vscode.Uri.joinPath(context.globalStorageUri, 'drafts'), output, async () => {
-    if (settings().provider !== 'copilot') throw new Error('Choose Copilot in Eyepiece settings to enable translations. ChatGPT and Claude Code adapters are not implemented.');
-    if (settings().targetLanguage !== 'python') throw new Error('EYE-1 supports Python views only. Set targetLanguage to python.');
-    return CopilotProvider.select();
-  });
-  context.subscriptions.push(workflow);
-  for (const command of ['translate', 'preview', 'apply'] as const) {
-    context.subscriptions.push(vscode.commands.registerCommand(`eyepiece.${command}`, async () => {
-      const doc = vscode.window.activeTextEditor?.document;
-      if (!doc) { await vscode.window.showErrorMessage('Select a Rust source or Eyepiece Python draft first.'); return; }
-      try {
-        return await workflow.exclusive(async () => await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Eyepiece: ${command}`, cancellable: command !== 'apply' }, async (_, token) => {
-          const controller = new AbortController();
-          const subscription = token.onCancellationRequested(() => controller.abort());
-          try { return await workflow[command](doc, controller.signal); }
-          finally { subscription.dispose(); }
-        }));
-      } catch (error) {
-        if (!(error instanceof vscode.CancellationError) && !(error instanceof Error && error.name === 'AbortError')) {
-          const message = error instanceof Error ? error.message : String(error);
-          output.appendLine(message); await vscode.window.showErrorMessage(`Eyepiece: ${message}`);
-        }
-        return undefined;
-      }
-    }));
-  }
-  context.subscriptions.push(vscode.commands.registerCommand('eyepiece.reopenDraft', () => workflow.reopen()));
-  refresh(); badge.show();
+  refresh(); updateButtons(); badge.show();
 }
 export function deactivate(): void { /* All resources are owned by context.subscriptions. */ }

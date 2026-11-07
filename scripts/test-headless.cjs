@@ -41,7 +41,7 @@ async function main(){
   CancellationError:class extends Error{},
   CancellationTokenSource:class {token={isCancellationRequested:false};cancel(){this.token.isCancellationRequested=true;}dispose(){}},
   window:{
-   activeTextEditor:undefined,createOutputChannel:()=>output,createStatusBarItem:()=>({...output}),
+   activeTextEditor:undefined,visibleTextEditors:[],registerWebviewViewProvider:noop,onDidChangeTextEditorSelection:noop,createOutputChannel:()=>output,createStatusBarItem:()=>({...output}),
    async showTextDocument(doc){
     const editor={document:doc,async edit(callback){const e=new WorkspaceEdit();callback({insert:(pos,text)=>e.insert(doc.uri,pos,text)});return api.workspace.applyEdit(e);}};
     this.activeTextEditor=editor;return editor;
@@ -78,6 +78,7 @@ async function main(){
    registerCommand(name,callback){commands.set(name,callback);return noop();},async getCommands(){return [...commands.keys()];},
    async executeCommand(name,...args){
     if(commands.has(name))return commands.get(name)(...args);
+    if(name==='setContext')return;
     if(name==='workbench.action.revertAndCloseActiveEditor'){api.window.activeTextEditor=undefined;return;}
     if(name==='vscode.diff'){
      const before=providers.get(args[0].scheme)?.provideTextDocumentContent(args[0]);

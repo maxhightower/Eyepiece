@@ -1,10 +1,27 @@
 export const providerIds = ['none', 'copilot', 'chatgpt', 'claudeCode'] as const;
 export type ProviderId = typeof providerIds[number];
+/** Languages the Rust source can be viewed in. extension names the saved draft file. */
+export const targetLanguages = {
+  python: { label: 'Python', extension: 'py' },
+  typescript: { label: 'TypeScript', extension: 'ts' },
+  javascript: { label: 'JavaScript', extension: 'js' },
+  go: { label: 'Go', extension: 'go' },
+  java: { label: 'Java', extension: 'java' },
+  csharp: { label: 'C#', extension: 'cs' },
+  cpp: { label: 'C++', extension: 'cpp' },
+} as const;
+export type TargetLanguage = keyof typeof targetLanguages;
+export interface LanguageOption { id: string; label: string }
+export const languageOptions = (): LanguageOption[] => Object.entries(targetLanguages).map(([id, item]) => ({ id, label: item.label }));
+export function filterLanguages(options: LanguageOption[], query: string): LanguageOption[] {
+  const text = query.trim().toLowerCase();
+  return options.filter(option => option.label.toLowerCase().includes(text) || option.id.includes(text));
+}
 export interface Settings { provider: ProviderId; targetLanguage: string }
 export function normalizeSettings(provider: unknown, language: unknown): Settings {
   return {
     provider: providerIds.includes(provider as ProviderId) ? provider as ProviderId : 'none',
-    targetLanguage: typeof language === 'string' && /^[a-z][a-z0-9_+-]{0,39}$/i.test(language.trim())
+    targetLanguage: typeof language === 'string' && language.trim().toLowerCase() in targetLanguages
       ? language.trim().toLowerCase() : 'python',
   };
 }
@@ -13,6 +30,6 @@ export function describeStatus(settings: Settings): string {
 Preferred view: ${settings.targetLanguage}
 Preferred provider: ${settings.provider}
 Connection: ${settings.provider === 'copilot' ? 'Copilot selected; model availability checked on request' : 'disabled or not implemented'}
-Rust → Python drafts; Preview → explicit Apply → Cargo checks → refreshed view.
-Saving Python does not change Rust. No telemetry. Model requests send the selected source and draft to Copilot.`;
+Rust → editable view; Preview → explicit Apply → Cargo checks → refreshed view.
+Editing the view does not change Rust. No telemetry. Model requests send the selected source and draft to Copilot.`;
 }

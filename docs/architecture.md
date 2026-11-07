@@ -2,7 +2,7 @@
 
 `extension.ts` owns commands, progress/cancellation, settings, status, and resource disposal. `Workflow` coordinates snapshots, drafts, immutable previews, explicit application, checks, and refresh. `core.ts` validates structured output and applies bounded UTF-16 replacements without VS Code dependencies.
 
-`ModelProvider` has translation and edit-proposal methods. `CopilotProvider` selects a model via the stable VS Code Language Model API during user commands. Requests are bounded by input tokens, a 120-second timeout, and a 1 MB response limit. Providers cannot execute commands or write files. Unknown/malformed JSON and ambiguous proposals fail closed; no automatic repair requests occur.
+`ModelProvider` has translation and edit-proposal methods. `CopilotProvider` selects a model via the stable VS Code Language Model API during user commands. Requests are bounded by input tokens, a 120-second timeout, and a 1 MB response limit. Providers cannot execute commands or write files. Unknown/malformed JSON and ambiguous proposals fail closed; no automatic repair requests occur. Proposals quote the Rust text to replace rather than giving offsets, because live models miscounted them; a quote must match exactly one place.
 
 ## State flow
 
