@@ -9,7 +9,7 @@ import { EyepiecePanel } from '../../src/panel';
 /** Live acceptance: real Copilot, real VS Code, real Cargo, on a temporary fixture copy. Spends Copilot quota. */
 const preferred = ['gpt-5-mini', 'gpt-4.1', 'gpt-4o'];
 export async function run(storage: vscode.Uri, marker: string): Promise<void> {
-  const uiOnly = marker.startsWith('ui:'), wanted = marker.replace(/^ui:/, '');
+  const uiOnly = marker.startsWith('ui:'), wanted = marker.replace(/^(ui|explain):/, '');
   const folder = vscode.workspace.workspaceFolders![0]!.uri;
   const log = (step: string, detail: unknown = '') => fs.appendFileSync(path.join(folder.fsPath, 'live-log.jsonl'), JSON.stringify({ at: new Date().toISOString(), step, detail }) + '\n');
   const output = vscode.window.createOutputChannel('Eyepiece live acceptance');
@@ -17,6 +17,32 @@ export async function run(storage: vscode.Uri, marker: string): Promise<void> {
   output.appendLine = (value: string) => { log('output', value); original(value); };
   let workflow: Workflow | undefined;
   try {
+    if (marker === 'gate') {
+      // Shows the test edit warning with a scripted proposal, for hands-on checks without spending quota.
+      const assertion = 'vec![8, 5]', needle = 'record.score >= minimum';
+      const scripted: ModelProvider = { id: 'test:gate',
+        async translate(request) { return { text: `# scripted view\nscore >= minimum\n`, sourceRevision: request.source.revision, mappings: [], caveats: [] }; },
+        async proposeEdit(request) {
+          const at = request.source.text.indexOf(needle), test = request.source.text.indexOf(assertion);
+          return { sourceRevision: request.source.revision, replacements: [{ start: at, end: at + needle.length, text: `record.score != 42 && ${needle}` }, { start: test, end: test + assertion.length, text: 'vec![8]' }], explanation: 'Skip 42 and change a test.', unresolvedChoices: [] };
+        },
+        async reviseView(request) { return { text: request.editedText, summary: 'Unused' }; } };
+      workflow = new Workflow(storage, output, async () => scripted, async () => true);
+      const gate = new EyepiecePanel(vscode.Uri.file(vscode.extensions.getExtension('maxhightower.eyepiece')!.extensionPath), workflow, () => 'python', async () => undefined);
+      const rust = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder, 'src', 'lib.rs'));
+      await vscode.window.showTextDocument(rust);
+      await gate.open(rust);
+      await gate.ready;
+      await gate.edit(gate.text + 'typed\n');
+      await gate.preview();
+      log('ui-tests', gate.needsTestDecision);
+      const deadline = Date.now() + 120000;
+      while (Date.now() < deadline && !fs.existsSync(path.join(folder.fsPath, 'live.continue'))) await new Promise(resolve => setTimeout(resolve, 500));
+      log('gate:result', { status: gate.statusText, error: gate.lastError, rust: rust.getText().split(/\r?\n/).filter(line => line.includes('.filter(') || line.includes('vec![8') ) });
+      gate.dispose();
+      log('done');
+      return;
+    }
     const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
     log('models', models.map(m => ({ id: m.id, family: m.family, max: m.maxInputTokens })));
     if (!models.length) throw new Error('No Copilot models visible to this extension');
@@ -43,6 +69,29 @@ export async function run(storage: vscode.Uri, marker: string): Promise<void> {
       return proposal;
     }, reviseView: (request, signal) => copilot.reviseView(request, signal) };
     workflow = new Workflow(storage, output, async () => provider, async () => true);
+    if (marker.startsWith('explain:')) {
+      workflow = new Workflow(storage, output, async () => provider, async () => true);
+      const explained = new EyepiecePanel(vscode.Uri.file(vscode.extensions.getExtension('maxhightower.eyepiece')!.extensionPath), workflow, () => 'english', async () => undefined);
+      const rust = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder, 'src', 'lib.rs'));
+      await vscode.window.showTextDocument(rust);
+      await explained.open(rust);
+      await explained.ready;
+      log('english:view', { links: explained.linkCount, error: explained.lastError, text: explained.text });
+      log('ui-english');
+      await new Promise(resolve => setTimeout(resolve, 7000));
+      const typed = explained.text!.replace(/(#+[^\n]*qualifying_scores[^\n]*\n)/, '$1\nScores of exactly zero are always left out of the result, whatever the minimum is.\n');
+      log('english:edited', typed !== explained.text);
+      await explained.edit(typed);
+      await explained.preview();
+      log('english:review', { hasReview: explained.hasReview, needsDecision: explained.needsTestDecision, status: explained.statusText, error: explained.lastError });
+      log('ui-english-review');
+      await new Promise(resolve => setTimeout(resolve, 7000));
+      await explained.apply(explained.needsTestDecision ? 'omit' : undefined);
+      log('english:applied', { status: explained.statusText, error: explained.lastError, rust: rust.getText().split(/\r?\n/).filter(line => line.includes('.filter(')) });
+      explained.dispose();
+      log('done');
+      return;
+    }
     const signal = new AbortController().signal;
     const source = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder, 'src', 'lib.rs'));
     const baseline = source.getText();
@@ -102,6 +151,14 @@ export async function run(storage: vscode.Uri, marker: string): Promise<void> {
     await panel.open(source);
     await panel.ready;
     log('panel:links', panel.linkCount);
+    const original = panel.text!;
+    await panel.edit(original.replace(/(\w+)\.score >= minimum/, '$1.active and $1.score >= minimum'));
+    await panel.preview();
+    log('panel:gate', { needsDecision: panel.needsTestDecision, status: panel.statusText, error: panel.lastError });
+    log('ui-tests');
+    await pause(8000);
+    panel.reject();
+    await panel.edit(original);
     await panel.ask('Skip scores of zero');
     log('panel:review', { hasReview: panel.hasReview, error: panel.lastError, draft: panel.text });
     log('ui-review');

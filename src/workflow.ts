@@ -3,10 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { sep } from 'node:path';
 import { ModelProvider, SourceSnapshot, TranslationResult } from './providers/types';
 import { TargetLanguage, targetLanguages } from './config';
-import { revision, parseTranslation, applyProposal } from './core';
+import { revision, parseTranslation, applyProposal, splitTestEdits, TestEdits } from './core';
 import { findManifest, runRustChecks } from './checks';
 export interface Session { source: SourceSnapshot; baseline: TranslationResult; providerId: string; draft: string; targetLanguage?: string }
-interface Pending { session: Session; draftText: string; candidate: string; manifest: vscode.Uri; explanation: string }
+interface Pending { session: Session; draftText: string; candidate: string; manifest: vscode.Uri; explanation: string; tests: TestEdits; testsRequested: boolean }
 export class Workflow implements vscode.Disposable {
   private readonly previews = new Map<string, string>();
   private readonly pending = new Map<string, Pending>();
@@ -83,7 +83,7 @@ export class Workflow implements vscode.Disposable {
     this.output.appendLine(`${baseline.mappings.length} source links supplied.`);
     this.output.show(true);
   }
-  async preview(draft: vscode.TextDocument, signal: AbortSignal, options: { showDiff?: boolean } = {}): Promise<string> {
+  async preview(draft: vscode.TextDocument, signal: AbortSignal, options: { showDiff?: boolean; testsRequested?: boolean } = {}): Promise<string> {
     this.assertTrusted();
     this.pending.delete(draft.uri.toString());
     const session = await this.load(draft);
@@ -97,7 +97,7 @@ export class Workflow implements vscode.Disposable {
       this.output.appendLine(`Proposal blocked: ${proposal.explanation}`);
       for (const choice of proposal.unresolvedChoices) this.output.appendLine(`• ${choice}`);
       this.output.show(true);
-      throw new Error('The model found an ambiguous edit. See Eyepiece output, clarify the view, and preview again.');
+      throw new Error(`This edit could mean different things, so nothing was changed. Clarify the view and preview again:\n${proposal.unresolvedChoices.map(choice => `• ${choice}`).join('\n')}`);
     }
     const candidate = applyProposal(session.source, proposal);
     await this.current(session);
@@ -106,15 +106,15 @@ export class Workflow implements vscode.Disposable {
     const before = vscode.Uri.parse(`eyepiece-preview:/${id}/before.rs`), after = vscode.Uri.parse(`eyepiece-preview:/${id}/after.rs`);
     this.previews.set(before.toString(), session.source.text); this.previews.set(after.toString(), candidate);
     if (this.previews.size > 40) { const keys = [...this.previews.keys()].slice(0,2); for (const key of keys) this.previews.delete(key); }
-    this.pending.set(draft.uri.toString(), { session, draftText, candidate, manifest, explanation: proposal.explanation });
+    this.pending.set(draft.uri.toString(), { session, draftText, candidate, manifest, explanation: proposal.explanation, tests: splitTestEdits(session.source, proposal), testsRequested: options.testsRequested === true });
     this.output.appendLine(`Proposed change: ${proposal.explanation}`); this.output.show(true);
     if (options.showDiff !== false) await vscode.commands.executeCommand('vscode.diff', before, after, 'Eyepiece: review Rust change (not applied)', { preview: true });
     return candidate;
   }
   /** The reviewed change for a draft, for showing inside the panel. */
-  review(draft: vscode.TextDocument): { before: string; after: string; explanation: string } | undefined {
+  review(draft: vscode.TextDocument): { before: string; after: string; explanation: string; tests: TestEdits; testsRequested: boolean } | undefined {
     const pending = this.pending.get(draft.uri.toString());
-    return pending && { before: pending.session.source.text, after: pending.candidate, explanation: pending.explanation };
+    return pending && { before: pending.session.source.text, after: pending.candidate, explanation: pending.explanation, tests: pending.tests, testsRequested: pending.testsRequested };
   }
   discard(draft: vscode.TextDocument): void { this.pending.delete(draft.uri.toString()); }
   async session(draft: vscode.TextDocument): Promise<Session> { return await this.load(draft); }
@@ -129,11 +129,15 @@ export class Workflow implements vscode.Disposable {
     this.output.appendLine(`Updated view: ${result.summary}`);
     return result.text;
   }
-  async apply(draft: vscode.TextDocument, signal: AbortSignal, options: { reveal?: boolean } = {}): Promise<boolean> {
+  async apply(draft: vscode.TextDocument, signal: AbortSignal, options: { reveal?: boolean; tests?: 'allow' | 'omit' } = {}): Promise<boolean> {
     this.assertTrusted();
     const pending = this.pending.get(draft.uri.toString());
     if (!pending) throw new Error('Run Preview source change on this draft first.');
     if (draft.getText() !== pending.draftText) throw new Error('Draft changed after preview. Preview again.');
+    // Passing checks mean little if the model also rewrote the tests, so that needs an explicit decision.
+    if (pending.tests.touchesTests && !pending.testsRequested && !options.tests) throw new Error('This change edits tests you did not ask to change. Choose whether to allow those edits.');
+    if (options.tests === 'omit' && pending.tests.withoutTests === undefined) throw new Error('This change cannot be applied without its test edits.');
+    const candidate = options.tests === 'omit' ? pending.tests.withoutTests! : pending.candidate;
     await this.current(pending.session);
     if (!await this.confirm()) return false;
     signal.throwIfAborted(); this.assertTrusted();
@@ -144,7 +148,7 @@ export class Workflow implements vscode.Disposable {
     await this.current(pending.session);
     if (draft.getText() !== pending.draftText) throw new Error('Draft changed while saving. Preview again.');
     const edit = new vscode.WorkspaceEdit();
-    edit.replace(source.uri, new vscode.Range(source.positionAt(0), source.positionAt(source.getText().length)), pending.candidate);
+    edit.replace(source.uri, new vscode.Range(source.positionAt(0), source.positionAt(source.getText().length)), candidate);
     if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code rejected the source edit.');
     this.pending.delete(draft.uri.toString());
     if (!await source.save()) throw new Error('Source edit is unsaved. Save or Undo it before continuing.');
@@ -153,7 +157,7 @@ export class Workflow implements vscode.Disposable {
       this.output.appendLine('Cargo checks FAILED. Source change retained for review/Undo; original draft preserved.');
       throw new Error('Cargo checks failed. Review Eyepiece output; Undo the Rust edit if needed. Draft preserved.');
     }
-    if (source.isDirty || source.getText() !== pending.candidate || Buffer.from(await vscode.workspace.fs.readFile(source.uri)).toString('utf8') !== pending.candidate) throw new Error('Source changed while Cargo was running. Results do not validate the current file; draft preserved.');
+    if (source.isDirty || source.getText() !== candidate || Buffer.from(await vscode.workspace.fs.readFile(source.uri)).toString('utf8') !== candidate) throw new Error('Source changed while Cargo was running. Results do not validate the current file; draft preserved.');
     this.output.appendLine('cargo check and cargo test passed. Refreshing as a new draft; previous draft preserved.');
     try { await this.translate(source, signal, { language: pending.session.targetLanguage ?? 'python', reveal: options.reveal }); }
     catch (error) { throw new Error(`Rust applied and checks passed, but refresh failed. Original draft preserved. ${String(error)}`); }

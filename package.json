@@ -79,6 +79,7 @@
           "type": "string",
           "default": "python",
           "enum": [
+            "english",
             "python",
             "typescript",
             "javascript",
@@ -88,6 +89,7 @@
             "cpp"
           ],
           "enumItemLabels": [
+            "English",
             "Python",
             "TypeScript",
             "JavaScript",
@@ -96,7 +98,7 @@
             "C#",
             "C++"
           ],
-          "description": "Language the Rust source is translated into."
+          "description": "Language the Rust source is shown in. English gives a plain-language explanation."
         },
         "eyepiece.provider": {
           "type": "string",
@@ -164,6 +166,7 @@
     "@codemirror/lang-go": "6.0.1",
     "@codemirror/lang-java": "6.0.2",
     "@codemirror/lang-javascript": "6.2.5",
+    "@codemirror/lang-markdown": "6.5.2",
     "@codemirror/lang-python": "6.2.1",
     "@codemirror/language": "6.13.1",
     "@codemirror/state": "6.7.6",

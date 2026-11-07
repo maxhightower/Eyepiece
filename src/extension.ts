@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
     sidebar.update();
   };
   const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons);
-  const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ enabled: settings().provider === 'copilot', language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview }), setLanguage);
+  const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ enabled: settings().provider === 'copilot', language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview && !panel.needsTestDecision }), setLanguage);
   const isRust = (doc: vscode.TextDocument) => doc.languageId === 'rust' && doc.uri.scheme === 'file';
   context.subscriptions.push(output, badge, workflow, panel,
     vscode.window.registerWebviewViewProvider('eyepiece.actions', sidebar),

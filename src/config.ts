@@ -2,6 +2,7 @@ export const providerIds = ['none', 'copilot', 'chatgpt', 'claudeCode'] as const
 export type ProviderId = typeof providerIds[number];
 /** Languages the Rust source can be viewed in. extension names the saved draft file. */
 export const targetLanguages = {
+  english: { label: 'English', extension: 'md' },
   python: { label: 'Python', extension: 'py' },
   typescript: { label: 'TypeScript', extension: 'ts' },
   javascript: { label: 'JavaScript', extension: 'js' },
