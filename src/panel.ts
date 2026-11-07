@@ -3,12 +3,12 @@ import { randomBytes } from 'node:crypto';
 import { Workflow } from './workflow';
 import { asksForTestChange, DiffLine, editsTestCode, lineDiff } from './core';
 import { TranslationResult } from './providers/types';
-import { languageOptions, targetLanguages } from './config';
+import { LanguageOption, languageOptions, targetLanguages } from './config';
 
 interface Review { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }
 type Inbound =
   | { type: 'ready' } | { type: 'cancel' } | { type: 'preview' } | { type: 'apply'; tests?: 'allow' | 'omit' } | { type: 'reject' } | { type: 'drafts' }
-  | { type: 'edit'; text: string } | { type: 'ask'; request: string } | { type: 'language'; id: string } | { type: 'jump'; offset: number };
+  | { type: 'edit'; text: string } | { type: 'ask'; request: string } | { type: 'language'; id: string } | { type: 'model'; id: string } | { type: 'jump'; offset: number };
 
 /** The Eyepiece app panel. All safety checks stay in Workflow; this class only drives it and renders state. */
 export class EyepiecePanel implements vscode.Disposable {
@@ -31,7 +31,8 @@ export class EyepiecePanel implements vscode.Disposable {
 
   constructor(private readonly extensionUri: vscode.Uri, private readonly workflow: Workflow,
     private readonly language: () => string, private readonly setLanguage: (id: string) => Thenable<void>,
-    private readonly onChange: () => void = () => undefined, private readonly providerLabel: () => string = () => '') {
+    private readonly onChange: () => void = () => undefined, private readonly providerLabel: () => string = () => '',
+    private readonly modelChoice: () => { models: LanguageOption[]; model: string } = () => ({ models: [], model: '' }), private readonly setModel: (id: string) => void = () => undefined) {
     this.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(event => this.followSource(event)));
   }
   dispose(): void { this.controller?.abort(); this.panel?.dispose(); for (const item of this.subscriptions) item.dispose(); }
@@ -76,6 +77,7 @@ export class EyepiecePanel implements vscode.Disposable {
       case 'reject': this.reject(); break;
       case 'drafts': await this.openDrafts(); break;
       case 'language': if (message.id !== this.language()) await this.setLanguage(message.id); break;
+      case 'model': this.setModel(message.id); break;
       case 'jump': await this.jump(message.offset); break;
     }
   }
@@ -83,7 +85,7 @@ export class EyepiecePanel implements vscode.Disposable {
     // The provider receives the code, so the panel always says which one is active.
     void this.panel?.webview.postMessage({ type: 'state', status: this.status, error: this.error, busy: this.busy, cancellable: this.cancellable,
       language: this.draftLanguage ?? this.language(), languages: languageOptions(),
-      provider: this.providerLabel(), hasDraft: !!this.draft, review: this.review, notes: this.baseline?.caveats ?? [], log: this.log_, text: withText ? this.draft?.getText() ?? '' : undefined });
+      provider: this.providerLabel(), ...this.modelChoice(), hasDraft: !!this.draft, review: this.review, notes: this.baseline?.caveats ?? [], log: this.log_, text: withText ? this.draft?.getText() ?? '' : undefined });
     this.onChange();
   }
   refresh(): void { this.publish(); }

@@ -9,7 +9,7 @@ export async function run(): Promise<void> {
   await extension.activate();
   assert.equal(extension.isActive, true);
   const commands = await vscode.commands.getCommands(true);
-  for (const id of ['openWelcome', 'openSample', 'showStatus', 'openSettings', 'setApiKey', 'chooseModel', 'translate', 'preview', 'apply', 'reopenDraft']) {
+  for (const id of ['openWelcome', 'openSample', 'showStatus', 'openSettings', 'setApiKey', 'translate', 'preview', 'apply', 'reopenDraft']) {
     assert.ok(commands.includes(`eyepiece.${id}`), `Missing command: ${id}`);
   }
   const status = await vscode.commands.executeCommand<string>('eyepiece.showStatus');

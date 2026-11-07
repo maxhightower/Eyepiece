@@ -4,9 +4,9 @@ const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, 
 let nextId = 0;
 
 /** Searchable dropdown shared by the panel and the sidebar. */
-export function languagePicker(onSelect: (id: string) => void, names = { title: 'Language', search: 'Search languages', empty: 'No matching languages', unset: '' }) {
+export function languagePicker(onSelect: (id: string) => void, names = { title: 'Language', search: 'Search languages', empty: 'No matching languages', unset: '', up: false }) {
   const id = `language-list-${nextId++}`;
-  const root = make('div', 'picker');
+  const root = make('div', names.up ? 'picker up' : 'picker');
   const trigger = make('button', 'picker-trigger');
   const triggerLabel = make('span', 'picker-label');
   trigger.type = 'button'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false'); trigger.title = names.title;

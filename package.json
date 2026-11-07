@@ -70,10 +70,6 @@
       {
         "command": "eyepiece.setApiKey",
         "title": "Eyepiece: Change API Key"
-      },
-      {
-        "command": "eyepiece.chooseModel",
-        "title": "Eyepiece: Change Model"
       }
     ],
     "configuration": {

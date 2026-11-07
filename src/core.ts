@@ -58,7 +58,7 @@ export function applyProposal(source: SourceSnapshot, proposal: ProposedEdit): s
   if (valid.unresolvedChoices.length) throw new Error('Resolve ambiguous choices before applying');
   let text = source.text;
   for (const e of [...valid.replacements].reverse()) text = text.slice(0,e.start)+e.text+text.slice(e.end);
-  if (text === source.text) throw new Error('Proposal contains no source changes');
+  if (text === source.text) throw new Error('Nothing to apply: this edit does not change what the code does, such as a change to comments only.');
   return text;
 }
 /** Translation links quote both sides, like replacements. Quotes that cannot be found are dropped: links are optional. */

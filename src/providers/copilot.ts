@@ -3,18 +3,18 @@ import { PromptedProvider } from './prompted';
 export class CopilotProvider extends PromptedProvider {
   readonly id: string;
   constructor(private readonly model: vscode.LanguageModelChat) { super(); this.id = `copilot:${model.id}`; }
-  private static chosenModelId: string | undefined;
-  static forgetChoice(): void { CopilotProvider.chosenModelId = undefined; }
-  static async select(): Promise<CopilotProvider> {
-    // Internal Copilot helpers (utility, dictation) also appear here but are not general chat models.
-    const models = (await vscode.lm.selectChatModels({ vendor: 'copilot' })).filter(model => !/^copilot-(utility|dictation)/.test(model.id));
-    const remembered = models.find(model => model.id === CopilotProvider.chosenModelId);
-    if (remembered) return new CopilotProvider(remembered);
-    if (!models.length) throw new Error('No Copilot models available. Enable GitHub Copilot in VS Code and sign in with an eligible account.');
-    const selected = models.length === 1 ? { model: models[0]! } : await vscode.window.showQuickPick(models.map(model => ({ label: model.name, description: model.id, model })), { title: 'Eyepiece: choose a Copilot model' });
-    if (!selected) throw new vscode.CancellationError();
-    CopilotProvider.chosenModelId = selected.model.id;
-    return new CopilotProvider(selected.model);
+  // Internal Copilot helpers (utility, dictation) also appear here but are not general chat models.
+  private static async available(): Promise<vscode.LanguageModelChat[]> {
+    return (await vscode.lm.selectChatModels({ vendor: 'copilot' })).filter(model => !/^copilot-(utility|dictation)/.test(model.id));
+  }
+  static async listModels(): Promise<Array<{ id: string; label: string }>> {
+    return (await CopilotProvider.available()).map(model => ({ id: model.id, label: model.name }));
+  }
+  static async select(modelId?: string): Promise<CopilotProvider> {
+    const models = await CopilotProvider.available();
+    const model = models.find(item => item.id === modelId) ?? models[0];
+    if (!model) throw new Error('No Copilot models available. Enable GitHub Copilot in VS Code and sign in with an eligible account.');
+    return new CopilotProvider(model);
   }
   protected async complete(input: string, signal: AbortSignal): Promise<string> {
     signal.throwIfAborted();

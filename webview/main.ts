@@ -15,7 +15,7 @@ import { languagePicker } from './picker';
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
 interface DiffLine { kind: ' ' | '+' | '-' | '…'; text: string }
-interface State { provider: string; status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
+interface State { provider: string; models: Array<{ id: string; label: string }>; model: string; status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
 
 const grammar = (id: string): Extension => ({ english: markdown(), rust: rust(), c: cpp(), python: python(), typescript: javascript({ typescript: true }), javascript: javascript(), go: go(), java: java(), csharp: cpp(), cpp: cpp() } as Record<string, Extension>)[id] ?? [];
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
@@ -25,7 +25,7 @@ const app = document.getElementById('app')!;
 const toolbar = element('header', 'toolbar');
 const picker = languagePicker(id => { flush(); vscode.postMessage({ type: 'language', id }); });
 const languageLabel = element('span', 'language-label', 'Language');
-const previewButton = button('Preview Source Change', 'primary', () => { flush(); vscode.postMessage({ type: 'preview' }); });
+const previewButton = button('Preview Source Change', 'quiet', () => { flush(); vscode.postMessage({ type: 'preview' }); });
 const draftsButton = button('Drafts', 'secondary', () => { flush(); vscode.postMessage({ type: 'drafts' }); });
 const providerName = element('span', 'provider-name');
 toolbar.append(languageLabel, picker.root, providerName, element('span', 'grow'), draftsButton, previewButton);
@@ -58,7 +58,10 @@ const input = element('textarea');
 input.rows = 2; input.placeholder = 'Describe a change, for example: skip zero scores';
 const send = element('button', 'primary', 'Send');
 composer.append(input, send);
-app.append(toolbar, banner, editorHost, review, details, composer);
+const modelPicker = languagePicker(id => vscode.postMessage({ type: 'model', id }), { title: 'Model', search: 'Search models', empty: 'No matching models', unset: 'Default model', up: true });
+const footer = element('div', 'footer-row');
+footer.append(details, modelPicker.root);
+app.append(toolbar, banner, editorHost, review, footer, composer);
 
 const syntax = new Compartment();
 const remote = Transaction.remote;
@@ -109,6 +112,8 @@ const render = (state: State) => {
   previewButton.disabled = blocked; draftsButton.disabled = state.busy; input.disabled = blocked;
   updateSend();
   view.dom.classList.toggle('busy', state.busy);
+  modelPicker.update(state.models, state.model, state.busy);
+  modelPicker.root.hidden = !state.models.length;
   banner.className = 'banner' + (state.error ? ' error' : state.busy ? ' working' : '');
   bannerText.textContent = state.error || state.status;
   banner.hidden = !state.error && !state.status;
