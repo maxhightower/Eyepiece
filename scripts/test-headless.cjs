@@ -41,7 +41,7 @@ async function main(){
   CancellationError:class extends Error{},
   CancellationTokenSource:class {token={isCancellationRequested:false};cancel(){this.token.isCancellationRequested=true;}dispose(){}},
   window:{
-   activeTextEditor:undefined,visibleTextEditors:[],registerWebviewViewProvider:noop,onDidChangeTextEditorSelection:noop,createOutputChannel:()=>output,createStatusBarItem:()=>({...output}),
+   activeTextEditor:undefined,visibleTextEditors:[],registerWebviewViewProvider:noop,onDidChangeTextEditorSelection:noop,onDidChangeVisibleTextEditors:noop,createOutputChannel:()=>output,createStatusBarItem:()=>({...output}),
    async showTextDocument(doc){
     const editor={document:doc,async edit(callback){const e=new WorkspaceEdit();callback({insert:(pos,text)=>e.insert(doc.uri,pos,text)});return api.workspace.applyEdit(e);}};
     this.activeTextEditor=editor;return editor;

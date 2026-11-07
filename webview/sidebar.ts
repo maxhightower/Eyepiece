@@ -3,7 +3,7 @@ import { LanguageOption } from '../src/config';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
-interface State { provider: string; providers: LanguageOption[]; language: string; languages: LanguageOption[]; panelOpen: boolean; previewReady: boolean; models: LanguageOption[]; model: string; modelError: string }
+interface State { provider: string; providers: LanguageOption[]; language: string; languages: LanguageOption[]; fileOpen: boolean; panelOpen: boolean; previewReady: boolean; models: LanguageOption[]; model: string; modelError: string }
 
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
 const command = (label: string, id: string, kind = 'primary') => { const node = element('button', kind, label); node.addEventListener('click', () => vscode.postMessage({ type: 'command', id })); return node; };
@@ -30,6 +30,7 @@ const open = section('Open a file, then open Eyepiece beside it.', command('Open
 const preview = section('Edit the view or send a request in the panel, then review the matching source change. The source is not changed yet.', command('Preview Source Change', 'eyepiece.preview', 'quiet'));
 const apply = section('Write the reviewed change to the source file, then run the project checks.', command('Apply and Run Checks', 'eyepiece.apply'));
 const settings = section('', command('Settings', 'eyepiece.openSettings', 'secondary'));
+settings.classList.add('sidebar-bottom');
 document.getElementById('app')!.append(provider, language, model, open, preview, apply, settings);
 
 window.addEventListener('message', event => {
@@ -41,6 +42,7 @@ window.addEventListener('message', event => {
   model.hidden = !state.models.length;
   keyButton.hidden = !usesKey;
   open.hidden = !enabled;
+  language.hidden = !state.fileOpen;
   preview.hidden = !enabled || !state.panelOpen;
   apply.hidden = !enabled || !state.previewReady;
   picker.update(state.languages, state.language, false);

@@ -45,7 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
     sidebar.update();
   };
   const panel: EyepiecePanel = new EyepiecePanel(context.extensionUri, workflow, () => settings().targetLanguage, setLanguage, updateButtons, () => ({ models, model: pickModel(ids(), selector.savedModel(settings().provider), panelModel) ?? '' }), id => { panelModel = id; panel.refresh(); });
-  const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ provider: settings().provider as ProviderId, language: settings().targetLanguage, panelOpen: panel.isOpen, previewReady: panel.hasReview && !panel.needsTestDecision, models, model: defaultModel(), modelError }), setLanguage, setProvider, setDefaultModel, refreshModels);
+  const sidebar: EyepieceSidebar = new EyepieceSidebar(context.extensionUri, () => ({ provider: settings().provider as ProviderId, language: settings().targetLanguage, fileOpen: panel.isOpen || vscode.window.visibleTextEditors.some(editor => isSource(editor.document)), panelOpen: panel.isOpen, previewReady: panel.hasReview && !panel.needsTestDecision, models, model: defaultModel(), modelError }), setLanguage, setProvider, setDefaultModel, refreshModels);
   const isSource = (doc: vscode.TextDocument) => doc.uri.scheme === 'file';
   context.subscriptions.push(output, badge, workflow, panel,
     vscode.window.registerWebviewViewProvider('eyepiece.actions', sidebar),
@@ -82,6 +82,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('eyepiece.preview', () => panel.preview()),
     vscode.commands.registerCommand('eyepiece.apply', () => panel.apply()),
     vscode.commands.registerCommand('eyepiece.reopenDraft', () => panel.openDrafts()),
+    vscode.window.onDidChangeVisibleTextEditors(() => sidebar.update()),
     vscode.workspace.onDidChangeConfiguration(event => {
       if (!event.affectsConfiguration('eyepiece')) return;
       refresh();

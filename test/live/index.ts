@@ -17,6 +17,19 @@ export async function run(storage: vscode.Uri, marker: string): Promise<void> {
   output.appendLine = (value: string) => { log('output', value); original(value); };
   let workflow: Workflow | undefined;
   try {
+    if (marker === 'empty') {
+      // Shows the sidebar with no file open, then with one, for hands-on checks.
+      const wait = (name: string) => new Promise<void>(resolve => { const timer = setInterval(() => { if (fs.existsSync(path.join(folder.fsPath, name))) { clearInterval(timer); resolve(); } }, 300); });
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand('workbench.view.extension.eyepiece');
+      log('ui-empty');
+      await wait('live.step');
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder, 'src', 'lib.rs')));
+      log('ui-file');
+      await wait('live.continue');
+      log('done');
+      return;
+    }
     if (marker === 'gate') {
       // Shows the test edit warning with a scripted proposal, for hands-on checks without spending quota.
       const assertion = 'vec![8, 5]', needle = 'record.score >= minimum';
