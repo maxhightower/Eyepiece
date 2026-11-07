@@ -4,12 +4,18 @@ export type ProviderId = typeof providerIds[number];
 export const targetLanguages = {
   english: { label: 'English', extension: 'md' },
   python: { label: 'Python', extension: 'py' },
+  rust: { label: 'Rust', extension: 'rs' },
   typescript: { label: 'TypeScript', extension: 'ts' },
   javascript: { label: 'JavaScript', extension: 'js' },
   go: { label: 'Go', extension: 'go' },
   java: { label: 'Java', extension: 'java' },
   csharp: { label: 'C#', extension: 'cs' },
   cpp: { label: 'C++', extension: 'cpp' },
+  c: { label: 'C', extension: 'c' },
+  ruby: { label: 'Ruby', extension: 'rb' },
+  php: { label: 'PHP', extension: 'php' },
+  swift: { label: 'Swift', extension: 'swift' },
+  kotlin: { label: 'Kotlin', extension: 'kt' },
 } as const;
 export type TargetLanguage = keyof typeof targetLanguages;
 export interface LanguageOption { id: string; label: string }
@@ -31,6 +37,6 @@ export function describeStatus(settings: Settings): string {
 Preferred view: ${settings.targetLanguage}
 Preferred provider: ${settings.provider}
 Connection: ${settings.provider === 'copilot' ? 'Copilot selected; model availability checked on request' : 'disabled or not implemented'}
-Rust → editable view; Preview → explicit Apply → Cargo checks → refreshed view.
-Editing the view does not change Rust. No telemetry. Model requests send the selected source and draft to Copilot.`;
+Source file → editable view; Preview → explicit Apply → project checks → refreshed view.
+Editing the view does not change the source. No telemetry. Model requests send the selected source and draft to Copilot.`;
 }

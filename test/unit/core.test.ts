@@ -28,8 +28,8 @@ test('quoted replacements resolve to exact offsets and fail closed', () => {
   assert.deepEqual(located('b = 1').replacements[0], { start: 16, end: 21, text: 'x' });
   assert.deepEqual(located('a = 1;\nlet b', 'c\nd').replacements[0], { start: 4, end: 17, text: 'c\r\nd' });
   assert.throws(() => located('= 1'), /more than one/);
-  assert.throws(() => located('missing'), /not in the Rust file/);
-  assert.throws(() => located(''), /not in the Rust file/);
+  assert.throws(() => located('missing'), /not in the source file/);
+  assert.throws(() => located(''), /not in the source file/);
 });
 test('translation links resolve from quotes and skip anything unfound', () => {
   const rust = { uri: 'file:///a.rs', language: 'rust', text: 'fn a() {}\r\nfn b() {}\r\n', revision: 'r' };
@@ -82,6 +82,16 @@ test('test edits are separated from production edits', () => {
   const spanning = { start: at('fn after'), end: at('assert!(true)'), text: '' };
   assert.equal(splitTestEdits(source2, plan(production, spanning)).withoutTests, undefined, 'partly overlapping edits cannot be separated');
   assert.equal(splitTestEdits(source2, plan({ start: at('mod tests') + 3, end: at('mod tests') + 3, text: 'x' })).touchesTests, true, 'insertions inside tests count');
+});
+test('other languages flag any edit that mentions test words', () => {
+  const text = 'def add(x):\n    return x\n\ndef test_add():\n    assert add(1) == 1\n';
+  const python = { uri: 'file:///a.py', language: 'python', text, revision: revision(text) };
+  const change = (find: string, to: string) => ({ start: text.indexOf(find), end: text.indexOf(find) + find.length, text: to });
+  const proposal = (...replacements: Array<{ start: number; end: number; text: string }>) => ({ sourceRevision: python.revision, replacements, explanation: '', unresolvedChoices: [] });
+  assert.equal(splitTestEdits(python, proposal(change('return x', 'return x + 1'))).touchesTests, false);
+  const mixed = splitTestEdits(python, proposal(change('return x', 'return x + 1'), change('assert add(1) == 1', 'assert add(1) == 2')));
+  assert.equal(mixed.touchesTests, true);
+  assert.ok(mixed.withoutTests!.includes('return x + 1') && mixed.withoutTests!.includes('== 1'));
 });
 test('only test code and explicit requests count as asking for test changes', () => {
   assert.equal(editsTestCode('a\n', 'a\nassert x == 1\n'), true);

@@ -9,6 +9,7 @@ import { java } from '@codemirror/lang-java';
 import { go } from '@codemirror/lang-go';
 import { cpp } from '@codemirror/lang-cpp';
 import { markdown } from '@codemirror/lang-markdown';
+import { rust } from '@codemirror/lang-rust';
 import { languagePicker } from './picker';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
@@ -16,7 +17,7 @@ const vscode = acquireVsCodeApi();
 interface DiffLine { kind: ' ' | '+' | '-' | '…'; text: string }
 interface State { status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
 
-const grammar = (id: string): Extension => ({ english: markdown(), python: python(), typescript: javascript({ typescript: true }), javascript: javascript(), go: go(), java: java(), csharp: cpp(), cpp: cpp() } as Record<string, Extension>)[id] ?? [];
+const grammar = (id: string): Extension => ({ english: markdown(), rust: rust(), c: cpp(), python: python(), typescript: javascript({ typescript: true }), javascript: javascript(), go: go(), java: java(), csharp: cpp(), cpp: cpp() } as Record<string, Extension>)[id] ?? [];
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
 const button = (label: string, className: string, onClick: () => void) => { const node = element('button', className, label); node.addEventListener('click', onClick); return node; };
 
@@ -24,7 +25,7 @@ const app = document.getElementById('app')!;
 const toolbar = element('header', 'toolbar');
 const picker = languagePicker(id => { flush(); vscode.postMessage({ type: 'language', id }); });
 const languageLabel = element('span', 'language-label', 'Language');
-const previewButton = button('Preview Rust Change', 'primary', () => { flush(); vscode.postMessage({ type: 'preview' }); });
+const previewButton = button('Preview Source Change', 'primary', () => { flush(); vscode.postMessage({ type: 'preview' }); });
 const draftsButton = button('Drafts', 'secondary', () => { flush(); vscode.postMessage({ type: 'drafts' }); });
 toolbar.append(languageLabel, picker.root, element('span', 'grow'), draftsButton, previewButton);
 const banner = element('div', 'banner');
@@ -33,7 +34,7 @@ const cancelButton = button('Cancel', 'secondary', () => vscode.postMessage({ ty
 banner.append(bannerText, cancelButton);
 const editorHost = element('main', 'editor');
 const review = element('section', 'review');
-const reviewTitle = element('h2', '', 'Proposed Rust change');
+const reviewTitle = element('h2', '', 'Proposed source change');
 const explanation = element('p', 'explanation');
 const diff = element('pre', 'diff');
 const reviewActions = element('div', 'actions');
@@ -47,7 +48,7 @@ const testDiff = element('pre', 'diff test-diff');
 testWarning.append(testWarningText, testDiff);
 review.append(reviewTitle, testWarning, explanation, diff, reviewActions);
 const details = element('details', 'details');
-const detailsSummary = element('summary', '', 'Notes and Cargo output');
+const detailsSummary = element('summary', '', 'Notes and check output');
 const notes = element('ul');
 const log = element('pre', 'log');
 details.append(detailsSummary, notes, log);

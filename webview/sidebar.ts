@@ -13,9 +13,9 @@ const picker = languagePicker(id => vscode.postMessage({ type: 'language', id })
 const label = element('label', 'sidebar-label', 'Language');
 const enable = section('Eyepiece uses your GitHub Copilot account. Nothing is sent until you click a button.', command('Enable Copilot', 'eyepiece.enableCopilot'));
 const language = section('', label, picker.root);
-const open = section('Open a Rust file, then open Eyepiece beside it.', command('Open Eyepiece', 'eyepiece.translate'), command('Reopen Saved Draft', 'eyepiece.reopenDraft', 'secondary'));
-const preview = section('Edit the view or send a request in the panel, then review the matching Rust change. Rust is not changed yet.', command('Preview Rust Change', 'eyepiece.preview'));
-const apply = section('Write the reviewed change to Rust, then run cargo check and cargo test.', command('Apply and Run Checks', 'eyepiece.apply'));
+const open = section('Open a file, then open Eyepiece beside it.', command('Open Eyepiece', 'eyepiece.translate'), command('Reopen Saved Draft', 'eyepiece.reopenDraft', 'secondary'));
+const preview = section('Edit the view or send a request in the panel, then review the matching source change. The source is not changed yet.', command('Preview Source Change', 'eyepiece.preview'));
+const apply = section('Write the reviewed change to the source file, then run the project checks.', command('Apply and Run Checks', 'eyepiece.apply'));
 const settings = section('', command('Settings', 'eyepiece.openSettings', 'secondary'));
 document.getElementById('app')!.append(enable, language, open, preview, apply, settings);
 

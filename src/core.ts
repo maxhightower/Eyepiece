@@ -30,8 +30,8 @@ export function locateReplacements(value: unknown, source: SourceSnapshot): unkn
   const eol = (text: string) => source.text.includes('\r\n') ? text.replace(/\r?\n/g, '\r\n') : text;
   return { ...v, replacements: v.replacements.map(item => {
     const e = object(item), find = eol(string(e.find)), start = source.text.indexOf(find);
-    if (!find || start < 0) throw new Error('The proposed change quotes text that is not in the Rust file. Preview again.');
-    if (source.text.includes(find, start + 1)) throw new Error('The proposed change matches more than one place in the Rust file. Preview again.');
+    if (!find || start < 0) throw new Error('The proposed change quotes text that is not in the source file. Preview again.');
+    if (source.text.includes(find, start + 1)) throw new Error('The proposed change matches more than one place in the source file. Preview again.');
     return { start, end: start + find.length, text: eol(string(e.text)) };
   }) };
 }
@@ -132,20 +132,22 @@ export function rustTestRanges(text: string): Array<{ start: number; end: number
   }
   return ranges;
 }
+const testWords = /\b(test|assert|expect)/i;
 export interface TestEdits { touchesTests: boolean; testsOnly: string; withoutTests?: string }
 const applyEdits = (text: string, edits: ProposedEdit['replacements']) => [...edits].reverse().reduce((result, e) => result.slice(0, e.start) + e.text + result.slice(e.end), text);
 /** Separates a proposal's test edits. withoutTests is only offered when production edits can stand alone. */
 export function splitTestEdits(source: SourceSnapshot, proposal: ProposedEdit): TestEdits {
-  const ranges = rustTestRanges(source.text);
+  const rust = source.language === 'rust', ranges = rust ? rustTestRanges(source.text) : [];
   const overlaps = (e: { start: number; end: number }, r: { start: number; end: number }) => e.start === e.end ? r.start < e.start && e.start < r.end : e.start < r.end && e.end > r.start;
-  const touching = proposal.replacements.filter(e => ranges.some(r => overlaps(e, r)));
+  // Other languages have no parser here, so any edit mentioning test words counts. This errs towards asking.
+  const touching = proposal.replacements.filter(e => rust ? ranges.some(r => overlaps(e, r)) : testWords.test(source.text.slice(e.start, e.end) + e.text));
   const others = proposal.replacements.filter(e => !touching.includes(e));
-  const partial = touching.some(e => !ranges.some(r => r.start <= e.start && e.end <= r.end));
+  const partial = rust && touching.some(e => !ranges.some(r => r.start <= e.start && e.end <= r.end));
   const withoutTests = touching.length && others.length && !partial ? applyEdits(source.text, others) : undefined;
   return { touchesTests: touching.length > 0, testsOnly: applyEdits(source.text, touching), ...(withoutTests === undefined ? {} : { withoutTests }) };
 }
 /** Whether typed edits change test code in the view. Comment lines do not count; unrecognised edits stay blocked. */
 export function editsTestCode(before: string, after: string): boolean {
-  return lineDiff(before, after).some(line => (line.kind === '+' || line.kind === '-') && !/^\s*(#|\/\/)/.test(line.text) && /\b(test|assert|expect)/i.test(line.text));
+  return lineDiff(before, after).some(line => (line.kind === '+' || line.kind === '-') && !/^\s*(#|\/\/)/.test(line.text) && testWords.test(line.text));
 }
 export const asksForTestChange = (request: string): boolean => /\btests?\b/i.test(request);

@@ -4,9 +4,9 @@ import { sep } from 'node:path';
 import { ModelProvider, SourceSnapshot, TranslationResult } from './providers/types';
 import { TargetLanguage, targetLanguages } from './config';
 import { revision, parseTranslation, applyProposal, splitTestEdits, TestEdits } from './core';
-import { findManifest, runRustChecks } from './checks';
+import { findManifest, runChecks } from './checks';
 export interface Session { source: SourceSnapshot; baseline: TranslationResult; providerId: string; draft: string; targetLanguage?: string }
-interface Pending { session: Session; draftText: string; candidate: string; manifest: vscode.Uri; explanation: string; tests: TestEdits; testsRequested: boolean }
+interface Pending { session: Session; draftText: string; candidate: string; manifest: vscode.Uri | undefined; explanation: string; tests: TestEdits; testsRequested: boolean }
 export class Workflow implements vscode.Disposable {
   private readonly previews = new Map<string, string>();
   private readonly pending = new Map<string, Pending>();
@@ -14,10 +14,12 @@ export class Workflow implements vscode.Disposable {
   private readonly registration: vscode.Disposable;
   private busy = false;
   private lastDraft: string | undefined;
+  /** Whether the last apply ran project checks, so the UI never implies a change was verified when it was not. */
+  checksRan = false;
   constructor(private readonly storage: vscode.Uri, private readonly output: vscode.OutputChannel,
     private readonly provider: () => Promise<ModelProvider>,
-    private readonly confirm: () => Promise<boolean> = async () => await vscode.window.showWarningMessage('Apply the reviewed Rust change, save the source, then run cargo check and cargo test? Cargo can execute project build scripts and tests. Failed checks leave the change in place for review or Undo.', { modal: true }, 'Apply and check') === 'Apply and check',
-    private readonly checks = runRustChecks) {
+    private readonly confirm: () => Promise<boolean> = async () => await vscode.window.showWarningMessage('Apply the reviewed change, save the source, then run the project checks? Checks can execute project build scripts and tests. Failed checks leave the change in place for review or Undo.', { modal: true }, 'Apply and check') === 'Apply and check',
+    private readonly checks = runChecks) {
     this.registration = vscode.workspace.registerTextDocumentContentProvider('eyepiece-preview', { provideTextDocumentContent: uri => this.previews.get(uri.toString()) ?? '' });
   }
   dispose(): void { this.registration.dispose(); }
@@ -58,8 +60,8 @@ export class Workflow implements vscode.Disposable {
   async translate(doc: vscode.TextDocument, signal: AbortSignal, options: { language?: string; reveal?: boolean } = {}): Promise<vscode.Uri> {
     const language = options.language ?? 'python';
     this.assertTrusted();
-    if (doc.languageId !== 'rust' || doc.uri.scheme !== 'file' || doc.isDirty) throw new Error('Save the Rust file first. Eyepiece translates saved Rust files.');
-    if (doc.getText().length > 100000) throw new Error('EYE-1 supports files up to 100,000 characters.');
+    if (doc.uri.scheme !== 'file' || doc.isDirty) throw new Error('Save the file first. Eyepiece translates saved files.');
+    if (doc.getText().length > 100000) throw new Error('Eyepiece supports files up to 100,000 characters.');
     const source = this.snapshot(doc), provider = await this.provider();
     const key = `${provider.id}:${source.uri}:${source.revision}:${language}`;
     const baseline = this.cache.get(key) ?? parseTranslation(await provider.translate({ source, targetLanguage: language }, signal), source);
@@ -78,7 +80,7 @@ export class Workflow implements vscode.Disposable {
     return draft;
   }
   private showCaveats(baseline: TranslationResult): void {
-    this.output.appendLine('View caveats (AI-generated; Rust remains authoritative):');
+    this.output.appendLine('View caveats (AI-generated; the source remains authoritative):');
     for (const caveat of baseline.caveats) this.output.appendLine(`• ${caveat}`);
     this.output.appendLine(`${baseline.mappings.length} source links supplied.`);
     this.output.show(true);
@@ -89,7 +91,7 @@ export class Workflow implements vscode.Disposable {
     const session = await this.load(draft);
     await this.current(session);
     if (draft.getText() === session.baseline.text) throw new Error('Edit the view before requesting a source change.');
-    const manifest = await findManifest(vscode.Uri.parse(session.source.uri));
+    const manifest = await findManifest(vscode.Uri.parse(session.source.uri), session.source.language);
     const draftText = draft.getText(), provider = await this.provider();
     const proposal = await provider.proposeEdit({ source: session.source, targetLanguage: session.targetLanguage ?? 'python', baseline: session.baseline, editedText: draftText }, signal);
     signal.throwIfAborted();
@@ -103,12 +105,13 @@ export class Workflow implements vscode.Disposable {
     await this.current(session);
     if (draft.getText() !== draftText) throw new Error('Draft changed while generating the proposal. Preview again.');
     const id = randomUUID();
-    const before = vscode.Uri.parse(`eyepiece-preview:/${id}/before.rs`), after = vscode.Uri.parse(`eyepiece-preview:/${id}/after.rs`);
+    const before = vscode.Uri.parse(`eyepiece-preview:/${id}/before.rs`), after = vscode.Uri.parse(`eyepiece-preview:/${id}/after.rs`); // Only names the preview; content comes from the map below.
+
     this.previews.set(before.toString(), session.source.text); this.previews.set(after.toString(), candidate);
     if (this.previews.size > 40) { const keys = [...this.previews.keys()].slice(0,2); for (const key of keys) this.previews.delete(key); }
     this.pending.set(draft.uri.toString(), { session, draftText, candidate, manifest, explanation: proposal.explanation, tests: splitTestEdits(session.source, proposal), testsRequested: options.testsRequested === true });
     this.output.appendLine(`Proposed change: ${proposal.explanation}`); this.output.show(true);
-    if (options.showDiff !== false) await vscode.commands.executeCommand('vscode.diff', before, after, 'Eyepiece: review Rust change (not applied)', { preview: true });
+    if (options.showDiff !== false) await vscode.commands.executeCommand('vscode.diff', before, after, 'Eyepiece: review change (not applied)', { preview: true });
     return candidate;
   }
   /** The reviewed change for a draft, for showing inside the panel. */
@@ -118,7 +121,7 @@ export class Workflow implements vscode.Disposable {
   }
   discard(draft: vscode.TextDocument): void { this.pending.delete(draft.uri.toString()); }
   async session(draft: vscode.TextDocument): Promise<Session> { return await this.load(draft); }
-  /** Rewrites the view text from a plain-language request. Rust is untouched until the normal preview and apply. */
+  /** Rewrites the view text from a plain-language request. The source is untouched until the normal preview and apply. */
   async revise(draft: vscode.TextDocument, changeRequest: string, signal: AbortSignal): Promise<string> {
     this.assertTrusted();
     const session = await this.load(draft);
@@ -153,14 +156,15 @@ export class Workflow implements vscode.Disposable {
     this.pending.delete(draft.uri.toString());
     if (!await source.save()) throw new Error('Source edit is unsaved. Save or Undo it before continuing.');
     this.output.show(true);
-    if (!await this.checks(pending.manifest, this.output, signal)) {
-      this.output.appendLine('Cargo checks FAILED. Source change retained for review/Undo; original draft preserved.');
-      throw new Error('Cargo checks failed. Review Eyepiece output; Undo the Rust edit if needed. Draft preserved.');
+    this.checksRan = pending.manifest !== undefined;
+    if (pending.manifest && !await this.checks(pending.manifest, this.output, signal)) {
+      this.output.appendLine('Checks FAILED. Source change retained for review/Undo; original draft preserved.');
+      throw new Error('Checks failed. Review the output; Undo the source edit if needed. Draft preserved.');
     }
-    if (source.isDirty || source.getText() !== candidate || Buffer.from(await vscode.workspace.fs.readFile(source.uri)).toString('utf8') !== candidate) throw new Error('Source changed while Cargo was running. Results do not validate the current file; draft preserved.');
-    this.output.appendLine('cargo check and cargo test passed. Refreshing as a new draft; previous draft preserved.');
+    if (source.isDirty || source.getText() !== candidate || Buffer.from(await vscode.workspace.fs.readFile(source.uri)).toString('utf8') !== candidate) throw new Error('Source changed while checks were running. Results do not validate the current file; draft preserved.');
+    this.output.appendLine(`${this.checksRan ? 'Checks passed' : 'No checks available'}. Refreshing as a new draft; previous draft preserved.`);
     try { await this.translate(source, signal, { language: pending.session.targetLanguage ?? 'python', reveal: options.reveal }); }
-    catch (error) { throw new Error(`Rust applied and checks passed, but refresh failed. Original draft preserved. ${String(error)}`); }
+    catch (error) { throw new Error(`Change applied, but the refresh failed. Original draft preserved. ${String(error)}`); }
     return true;
   }
   async reopen(options: { reveal?: boolean } = {}): Promise<vscode.TextDocument | undefined> {

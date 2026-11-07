@@ -8,4 +8,4 @@ Edit and save the Python draft, then **Preview source change**. Inspect the Rust
 
 Use **Reopen saved draft** after restarting VS Code. Caveats and check results appear in the Eyepiece output channel. Saving Python never applies Rust changes. Source/draft drift requires a fresh preview or translation.
 
-Only Rust source and Copilot are implemented. Views are available in plain English, Python, TypeScript, JavaScript, Go, Java, C#, and C++. No AI account is included. No telemetry. Source/drafts are sent to the selected Copilot model on request. Drafts and source snapshots are saved locally in extension storage.
+Any saved file can be viewed in plain English or another programming language. Only Copilot is implemented. No AI account is included. No telemetry. Source/drafts are sent to the selected Copilot model on request. Drafts and source snapshots are saved locally in extension storage.
