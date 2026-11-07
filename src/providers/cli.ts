@@ -19,6 +19,7 @@ export const codexCommand = (): CliCommand => ({
   parse: stdout => stdout,
 });
 /** Runs the user's installed Claude Code for personal use, with every tool, MCP server, and project setting off. */
+
 export const claudeCommand = (command: string): CliCommand => ({
   id: 'claudeCode', label: 'Claude Code', command, shell: false,
   args: ['-p', '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence', '--output-format', 'json'],
