@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ProposedEdit, SourceSnapshot, TranslationResult, ViewRevision } from './providers/types';
+import { ProposedEdit, SourceMapping, SourceSnapshot, TranslationResult, ViewRevision } from './providers/types';
 export const revision = (text: string): string => createHash('sha256').update(text).digest('hex');
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected JSON object');
@@ -155,4 +155,24 @@ export const asksForTestChange = (request: string): boolean => /\btests?\b/i.tes
 export function parseModelJson(text: string): unknown {
   const fenced = /^\s*```(?:json)?\s*\n([\s\S]*?)\n?```\s*$/.exec(text);
   return JSON.parse(fenced ? fenced[1]! : text);
+}
+export interface LinkBlock { view: { from: number; to: number }; source: { from: number; to: number } }
+const trimmedEnd = (text: string, from: number, to: number) => { while (to > from && /\s/.test(text[to - 1]!)) to--; return to; };
+/**
+ * Turns link anchors into whole blocks: each runs from its anchor to the next one, on each side.
+ * Anchors are found again in the current view, so links survive edits. An anchor the user removed drops out.
+ */
+export function linkBlocks(mappings: SourceMapping[], baseline: string, current: string, source: string): LinkBlock[] {
+  let cursor = 0;
+  const found = [...mappings].sort((a, b) => a.viewStart - b.viewStart).flatMap(mapping => {
+    const quote = baseline.slice(mapping.viewStart, mapping.viewEnd), from = quote ? current.indexOf(quote, cursor) : -1;
+    if (from < 0) return [];
+    cursor = from + quote.length;
+    return [{ mapping, from }];
+  });
+  const starts = [...new Set(mappings.map(mapping => mapping.sourceStart))].sort((a, b) => a - b);
+  return found.map(({ mapping, from }, index) => {
+    const sourceTo = starts.find(start => start > mapping.sourceStart) ?? source.length;
+    return { view: { from, to: trimmedEnd(current, from, found[index + 1]?.from ?? current.length) }, source: { from: mapping.sourceStart, to: trimmedEnd(source, mapping.sourceStart, sourceTo) } };
+  });
 }

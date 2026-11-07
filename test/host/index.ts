@@ -63,10 +63,16 @@ async function panelLoop(): Promise<void> {
     await Promise.race([panel.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Webview script did not load')),15000))]);
     assert.equal(panel.lastError,'');
     assert.match(panel.text!,/python/);
+    assert.equal(panel.linkCount,1);
+    await panel.linkTo(0,true);
+    assert.equal(panel.activeLink,0,'a linked block can be highlighted');
+    await panel.linkTo(null);
+    assert.equal(panel.activeLink,null);
     assert.equal(draftTabs(),tabsBefore,'panel must not open a draft tab');
     await panel.open(source);
     assert.deepEqual(languages,['python'],'reopening the same view must not translate again');
     await panel.edit(panel.text!+'typed\n');
+    assert.equal(panel.linkCount,1,'links survive edits');
     await panel.preview();
     assert.equal(panel.hasReview,true);
     assert.equal(source.getText(),original,'review must not change Rust');

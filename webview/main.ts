@@ -1,6 +1,6 @@
 import { basicSetup } from 'codemirror';
-import { Compartment, EditorSelection, Extension, Transaction } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { Compartment, Extension, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { python } from '@codemirror/lang-python';
@@ -15,7 +15,8 @@ import { languagePicker } from './picker';
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
 interface DiffLine { kind: ' ' | '+' | '-' | '…'; text: string }
-interface State { provider: string; models: Array<{ id: string; label: string }>; model: string; status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
+interface Block { from: number; to: number }
+interface State { blocks: Block[]; models: Array<{ id: string; label: string }>; model: string; status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
 
 const grammar = (id: string): Extension => ({ english: markdown(), rust: rust(), c: cpp(), python: python(), typescript: javascript({ typescript: true }), javascript: javascript(), go: go(), java: java(), csharp: cpp(), cpp: cpp() } as Record<string, Extension>)[id] ?? [];
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
@@ -27,8 +28,7 @@ const picker = languagePicker(id => { flush(); vscode.postMessage({ type: 'langu
 const languageLabel = element('span', 'language-label', 'Language');
 const previewButton = button('Preview Source Change', 'quiet', () => { flush(); vscode.postMessage({ type: 'preview' }); });
 const draftsButton = button('Drafts', 'secondary', () => { flush(); vscode.postMessage({ type: 'drafts' }); });
-const providerName = element('span', 'provider-name');
-toolbar.append(languageLabel, picker.root, providerName, element('span', 'grow'), draftsButton, previewButton);
+toolbar.append(languageLabel, picker.root, element('span', 'grow'), draftsButton, previewButton);
 const banner = element('div', 'banner');
 const bannerText = element('span');
 const cancelButton = button('Cancel', 'secondary', () => vscode.postMessage({ type: 'cancel' }));
@@ -64,6 +64,35 @@ footer.append(details, modelPicker.root);
 app.append(toolbar, banner, editorHost, review, footer, composer);
 
 const syntax = new Compartment();
+// The block matching the other side, shown as a full-width highlight on each of its lines.
+const setLinked = StateEffect.define<Block | null>();
+const linkedLines = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    value = value.map(transaction.changes);
+    for (const effect of transaction.effects) if (effect.is(setLinked)) {
+      const { doc } = transaction.state;
+      if (!effect.value) { value = Decoration.none; continue; }
+      const first = doc.lineAt(Math.min(effect.value.from, doc.length)).number, last = doc.lineAt(Math.min(effect.value.to, doc.length)).number;
+      value = Decoration.set(Array.from({ length: last - first + 1 }, (_, index) => Decoration.line({ class: 'cm-linked' }).range(doc.line(first + index).from)));
+    }
+    return value;
+  },
+  provide: field => EditorView.decorations.from(field),
+});
+// A click or the source cursor pins a block. Hovering shows another one until the mouse leaves.
+let blocks: Block[] = [], linked: number | null = null, pinned: number | null = null;
+const blockAt = (offset: number | null) => { const index = offset === null ? -1 : blocks.findIndex(block => block.from <= offset && offset <= block.to); return index < 0 ? null : index; };
+const showLinked = (index: number | null, scroll: boolean) => {
+  linked = index;
+  const block = index === null ? null : blocks[index] ?? null;
+  view.dispatch({ effects: scroll && block ? [setLinked.of(block), EditorView.scrollIntoView(block.from, { y: 'center' })] : [setLinked.of(block)] });
+};
+const pointTo = (index: number | null, scroll: boolean) => {
+  if (index === linked && !scroll) return;
+  showLinked(index, false);
+  vscode.postMessage({ type: 'link', index, scroll });
+};
 const remote = Transaction.remote;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const flush = () => { if (timer) { clearTimeout(timer); timer = undefined; vscode.postMessage({ type: 'edit', text: view.state.doc.toString() }); } };
@@ -81,7 +110,7 @@ const highlight = HighlightStyle.define([
 ]);
 const view = new EditorView({
   parent: editorHost,
-  extensions: [basicSetup, syntax.of([]), syntaxHighlighting(highlight), EditorView.lineWrapping,
+  extensions: [basicSetup, syntax.of([]), syntaxHighlighting(highlight), linkedLines, EditorView.lineWrapping,
     EditorView.theme({
       '&': { height: '100%', color: 'var(--vscode-editor-foreground)', backgroundColor: 'var(--vscode-editor-background)' },
       '.cm-scroller': { fontFamily: 'var(--vscode-editor-font-family)', fontSize: 'var(--vscode-editor-font-size)' },
@@ -95,7 +124,11 @@ const view = new EditorView({
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, 300);
     }),
-    EditorView.domEventHandlers({ click: (_event, editor) => { vscode.postMessage({ type: 'jump', offset: editor.state.selection.main.head }); return false; } }),
+    EditorView.domEventHandlers({
+      click: (_event, editor) => { pinned = blockAt(editor.state.selection.main.head); pointTo(pinned, true); return false; },
+      mousemove: (event, editor) => { pointTo(blockAt(editor.posAtCoords({ x: event.clientX, y: event.clientY })) ?? pinned, false); return false; },
+      mouseleave: () => { pointTo(pinned, false); return false; },
+    }),
   ],
 });
 const setText = (text: string) => { if (timer) { clearTimeout(timer); timer = undefined; } view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, annotations: remote.of(true) }); };
@@ -104,10 +137,10 @@ let current = '';
 let blocked = true;
 const updateSend = () => { send.disabled = blocked || !input.value.trim(); };
 const render = (state: State) => {
-  if (state.text !== undefined) setText(state.text);
+  if (state.text !== undefined) { setText(state.text); pinned = null; showLinked(null, false); }
+  blocks = state.blocks;
   if (state.language !== current) { current = state.language; view.dispatch({ effects: syntax.reconfigure(grammar(current)) }); }
   picker.update(state.languages, state.language, state.busy);
-  providerName.textContent = state.provider ? `via ${state.provider}` : '';
   blocked = state.busy || !state.hasDraft;
   previewButton.disabled = blocked; draftsButton.disabled = state.busy; input.disabled = blocked;
   updateSend();
@@ -144,7 +177,7 @@ window.addEventListener('message', event => {
   const message = event.data;
   if (message.type === 'state') render(message);
   if (message.type === 'log') { log.textContent = message.text; log.scrollTop = log.scrollHeight; }
-  if (message.type === 'highlight') view.dispatch({ selection: EditorSelection.range(message.from, message.to), effects: EditorView.scrollIntoView(message.from, { y: 'center' }) });
+  if (message.type === 'focus') { pinned = message.index; showLinked(message.index, message.scroll); }
 });
 input.addEventListener('input', updateSend);
 const submit = () => { const request = input.value.trim(); if (!request || send.disabled) return; flush(); vscode.postMessage({ type: 'ask', request }); input.value = ''; updateSend(); };
