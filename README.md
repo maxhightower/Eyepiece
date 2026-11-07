@@ -1,56 +1,126 @@
 # Eyepiece
 
-Read any source file through an editable view in a language you know, or in plain English, then review and explicitly apply the intended change to the original file.
+**See code in a language you understand. Make changes with confidence.**
 
-EYE-0 foundation and EYE-1 first working loop are implemented. This is an experimental local VS Code extension. AI translations are approximations; the Rust source remains authoritative.
+Eyepiece is an experimental VS Code extension that lets you open a source file as an editable view in another programming language—or as a plain-English explanation. Edit the view or describe the change you want, inspect the proposed modification to the original source, and explicitly approve it before anything is applied.
 
-## Install and use
+> **Early development · v0.0.1** — Available to build and install locally. Not yet published to the VS Code Marketplace. AI-generated translations and edits require careful review.
 
-1. Build locally with `npm ci && npm run package`, or download the `eyepiece-vsix` artifact when available from a successful [GitHub Actions run](https://github.com/maxhightower/Eyepiece/actions). Extract the ZIP, then use **Extensions → … → Install from VSIX**.
-2. Open a local Rust/Cargo project in VS Code 1.95 or later. Install Rust/Cargo. Trust the workspace only if you trust its build scripts and tests.
-3. Click the **Eyepiece** eye icon in the activity bar and pick an **AI provider**: GitHub Copilot, an Anthropic or OpenAI API key (stored in VS Code secret storage, billed by the provider), Codex with your ChatGPT plan, or Claude Code (personal use). Eyepiece does not supply a subscription or bypass model quotas.
-4. Open a saved file and click the **eye button** in the editor title bar, or **Open Eyepiece** in the sidebar. The Eyepiece panel opens to the right, using the **Default model** from the sidebar. To use a different model for this session, change the model dropdown at the bottom of the panel. Grant VS Code's model-access consent if asked.
-5. Pick a language from the searchable **Language** dropdown in the panel or the sidebar. Switching retranslates from the Rust; earlier drafts stay available.
-6. Make your change either way: type directly in the panel editor and click **Preview Rust Change**, or describe it in the box at the bottom and click **Send**. Neither changes Rust.
-7. Review the proposed Rust change in the panel, then click **Apply and Run Checks** and confirm, or **Reject**. Eyepiece runs `cargo check --locked` and `cargo test --locked` and streams the output under **Notes and Cargo output**.
-8. On success a fresh view loads. Earlier drafts remain available through **Drafts**. If checks fail, the source change remains for inspection/Undo; the draft is preserved. Undo the Rust edit and save to restore it.
+## Why Eyepiece?
 
-For a dependency-free example, open `fixtures/rust` as the workspace. Ask the Python view to exclude zero scores, then inspect the Rust proposal. Existing tests should continue passing. Adding an active-only filter intentionally conflicts with the existing fixture tests and demonstrates the failed-check path.
+You shouldn't need to be fluent in every language in a repository to understand or contribute to it.
 
-**Eyepiece: Open Rust sample** opens an untitled copy for inspection only. Save it inside a Cargo project before translating.
+Eyepiece gives you a familiar perspective on unfamiliar code while keeping the **original source file authoritative**. It is a translation and change-review workflow, not a promise of exact cross-language equivalence or an automatic repository migration.
 
-## Current boundaries
+## Features
 
-- Any saved local text file, up to 100,000 characters, viewed as a plain-English explanation or in Python, Rust, TypeScript, JavaScript, Go, Java, C#, C++, C, Ruby, PHP, Swift, or Kotlin. A file set to its own language shows English.
-- Apply runs Cargo for Rust, `go test` for Go, `npm test` for JavaScript and TypeScript with a test script, and `pytest` for Python with a `pyproject.toml`, `pytest.ini`, or `setup.cfg`. Anything else applies with no checks, and Eyepiece says so. Translations can be inaccurate, especially between very different languages.
-- Codex and Claude Code run your own installed program with your own sign-in, in an empty temporary folder. Claude Code has all tools off. Codex runs in a read-only sandbox. Check each provider's terms before depending on subscription access, especially in anything you distribute.
-- No background requests. Translation cache is bounded and lives only for this VS Code session; saved drafts and baseline metadata persist in extension global storage.
-- The selected provider sees the source file, and for proposals the original and edited view. No repository-wide context is sent. No telemetry or Eyepiece server.
-- Drafts contain source code in plaintext in VS Code's extension storage. Delete them there when no longer needed. Uninstalling may not remove that storage.
-- Structured responses are validated; invalid ranges, overlap, ambiguity, stale revisions, source drift, or changed drafts block Apply. Hovering over a block highlights its match on the other side, and clicking scrolls to it, in either direction. Links keep working as you edit, except for blocks whose section marker you remove, and stop if the source itself changes.
-- Proposals that edit tests need a decision: `#[cfg(test)]` or `#[test]` code in Rust, and any edit mentioning test, assert, or expect in other languages. The exception is editing tests in the view yourself or mentioning tests in your request. Tests elsewhere, such as a `tests/` folder, are outside the single file Eyepiece edits. Recognising your own test edits is a word-based check, so an unrecognised one simply asks you to decide.
-- Cargo executes in the trusted project and may run build scripts/tests or fetch dependencies. Checks run after Apply, do not prove semantic equivalence, and do not automatically revert a failed edit.
-- File mutation uses VS Code's edit/Undo mechanism. External writers should remain paused during Apply; full filesystem transaction isolation is out of scope.
-- Automated integration tests use scripted model responses with real VS Code and Cargo. `npm run test:live` runs the loop against the signed-in Copilot account in the running VS Code, on a temporary fixture copy, and spends quota. It stops before the Apply confirmation dialog when driving the extension commands.
+- **Read in your language:** View a saved local source file as Python, Rust, TypeScript, JavaScript, Go, Java, C#, C++, C, Ruby, PHP, Swift, Kotlin, or plain English.
+- **Edit the translated view:** Work directly in the familiar representation, or request an edit in natural language.
+- **Preview before applying:** Review the proposed change to the actual source and choose whether to apply or reject it.
+- **Navigate corresponding code:** Linked blocks help you move between the original file and the translated view.
+- **Keep drafts:** Revisit earlier drafts during your VS Code session and reopen saved drafts.
+- **Bring your own AI:** Use GitHub Copilot, OpenAI or Anthropic API keys, or supported local Codex and Claude Code installations. Provider availability and billing depend on your own account.
+- **Run project checks:** After applying, Eyepiece can run supported project tests or checks and display their output.
+
+## How it works
+
+1. **Open** a saved file in a trusted local VS Code workspace.
+2. **Choose** an AI provider and the language you want to work in.
+3. **Explore** the translated view alongside your original file.
+4. **Edit** the view or describe the intended change.
+5. **Preview** the proposed source edit and explicitly approve or reject it.
+6. **Check** the result using available project-specific commands.
+
+**Your original file is not changed by translating, editing the view, or generating a preview.** It changes only when you approve Apply. Checks run *after* Apply; a failed check does not automatically roll back the change. Use VS Code Undo if necessary.
+
+## Get started
+
+### Requirements
+
+- VS Code **1.95+**
+- A trusted **local** workspace and a saved source file
+- Your own configured AI provider
+- Relevant project tooling if you want automated checks (for example, Rust/Cargo)
+
+### Install from source
+
+```bash
+git clone https://github.com/maxhightower/Eyepiece.git
+cd Eyepiece
+npm ci
+npm run package
+```
+
+In VS Code, open **Extensions → … → Install from VSIX**, select `eyepiece-0.0.1.vsix`, and reload if prompted.
+
+Alternatively, download an `eyepiece-vsix` artifact from a successful [GitHub Actions run](https://github.com/maxhightower/Eyepiece/actions), extract it, and install the included VSIX.
+
+### First translation
+
+1. Open the **Eyepiece** activity-bar icon.
+2. Select a provider and default model. API keys are stored using VS Code secret storage where applicable.
+3. Open a saved file and click the **eye icon** in the editor title bar (or choose **Open Eyepiece** in the sidebar).
+4. Select a language in the panel, then edit its contents or send an instruction.
+5. Click **Preview Rust Change** / **Preview Source Change** as offered by the UI. Inspect the result and choose **Apply and Run Checks** or **Reject**.
+
+For a self-contained example, open `fixtures/rust` as your workspace, translate its Rust source to Python, and try asking for a small behavioral change. The fixture is designed to exercise both passing and failing check paths.
+
+## Supported checks
+
+| Source project | After-Apply command |
+| --- | --- |
+| Rust / Cargo | `cargo check --locked`, then `cargo test --locked` |
+| Go | `go test` |
+| JavaScript / TypeScript | `npm test` when a test script exists |
+| Python | `pytest` when a supported project configuration exists |
+| Other or unconfigured projects | No automatic checks; Eyepiece indicates this |
+
+These checks are safeguards, **not proof that a translation preserves behavior**. Review the proposed diff and use your project's own tests.
+
+## Privacy and safety
+
+- Eyepiece does **not** make background model requests. Requests are initiated through extension actions.
+- Your selected provider receives the source file and, when preparing edits, the original and edited view. No repository-wide context is sent.
+- There is no Eyepiece-operated backend or telemetry.
+- Translation cache is session-bounded; drafts and baseline metadata are stored by VS Code. **Saved drafts can contain source code in plaintext** in extension storage.
+- Codex and Claude Code integrations use your installed CLI and sign-in, subject to provider terms and quotas.
+- Running project checks may execute build scripts, tests, or dependency downloads. Only trust projects whose code you are willing to execute.
+
+See [Architecture](docs/architecture.md) for implementation details and the [EYE-0/EYE-1 report](docs/EYE-0-1.md) for the initial milestone.
 
 ## Development
 
-Node 22+, npm, Rust/Cargo, Python 3; Linux host tests also need Xvfb and VS Code desktop libraries.
+Prerequisites: Node.js **22+**, npm, Rust/Cargo, and Python 3. Linux extension-host testing additionally needs Xvfb and VS Code desktop dependencies.
 
-```sh
+```bash
 npm ci
 npm run check
-xvfb-run -a npm run test:host
+npm run test:host
 npm run package
-xvfb-run -a npm run verify:package
+npm run verify:package
 ```
 
-On macOS/Windows, omit `xvfb-run -a`. Press F5 for an Extension Development Host. Host tests use VS Code 1.95.3 (minimum supported line); set `VSCODE_VERSION=stable` to check the current stable version. The suite copies the Rust fixture to a temporary workspace, leaving the repository fixture unchanged. Packaged tests load implementation code from the extracted VSIX.
+On a headless Linux machine, run host and package-verification commands under `xvfb-run -a`. Press **F5** in VS Code to launch an Extension Development Host.
 
-The headless simulation (`npm run test:headless`, included in `check`) exercises the workflow with simulated VS Code APIs and real files/Cargo; it is not desktop acceptance.
+- `npm run check`: unit tests, Rust fixture tests, and headless workflow simulation.
+- `npm run test:host`: real VS Code extension-host integration tests.
+- `npm run verify:package`: tests the packaged VSIX.
+- `npm run test:live`: optional live provider test that consumes account quota.
 
-CI checks TypeScript, protocol/config tests, the Rust fixture, real extension-host workflows, and the packaged VSIX, then uploads the installable artifact. See [architecture](docs/architecture.md) and [milestone report](docs/EYE-0-1.md).
+CI runs the extension and packaging checks and publishes a VSIX build artifact when successful.
 
-## Project status
+## Status and roadmap
 
-No Marketplace release or publisher registration has been performed. `maxhightower` is the proposed publisher ID. The repository remains private; licensing is `UNLICENSED` until a public open-source license is chosen. The intended product is a free extension.
+The first working extension workflow is implemented, but Eyepiece remains experimental. Current limitations include approximate model translations, single-file source changes, local-file-only workspaces, and project checks that do not automatically revert failures.
+
+Near-term priorities are improving translation fidelity, review ergonomics, reliability across languages, and the installation/onboarding experience. Issues and focused pull requests are welcome.
+
+## Contributing
+
+Found a translation mismatch, confusing review flow, or unsupported project layout? [Open an issue](https://github.com/maxhightower/Eyepiece/issues) with a minimal reproducible example, VS Code version, language pair, provider type, and expected versus actual behavior. **Remove secrets and proprietary code before sharing logs or examples.**
+
+For a code contribution, open an issue for larger changes, keep pull requests focused, and run `npm run check` before submitting.
+
+## License
+
+**Source-available, not yet open-source licensed.** The package currently declares `UNLICENSED`; no open-source license has been selected. Public GitHub visibility does not grant permission to redistribute or reuse the code beyond applicable law. A license must be added before describing Eyepiece as open source.
