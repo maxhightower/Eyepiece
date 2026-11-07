@@ -31,7 +31,7 @@ export class EyepiecePanel implements vscode.Disposable {
 
   constructor(private readonly extensionUri: vscode.Uri, private readonly workflow: Workflow,
     private readonly language: () => string, private readonly setLanguage: (id: string) => Thenable<void>,
-    private readonly onChange: () => void = () => undefined) {
+    private readonly onChange: () => void = () => undefined, private readonly providerLabel: () => string = () => '') {
     this.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(event => this.followSource(event)));
   }
   dispose(): void { this.controller?.abort(); this.panel?.dispose(); for (const item of this.subscriptions) item.dispose(); }
@@ -80,11 +80,13 @@ export class EyepiecePanel implements vscode.Disposable {
     }
   }
   private publish(withText = false): void {
+    // The provider receives the code, so the panel always says which one is active.
     void this.panel?.webview.postMessage({ type: 'state', status: this.status, error: this.error, busy: this.busy, cancellable: this.cancellable,
       language: this.draftLanguage ?? this.language(), languages: languageOptions(),
-      hasDraft: !!this.draft, review: this.review, notes: this.baseline?.caveats ?? [], log: this.log_, text: withText ? this.draft?.getText() ?? '' : undefined });
+      provider: this.providerLabel(), hasDraft: !!this.draft, review: this.review, notes: this.baseline?.caveats ?? [], log: this.log_, text: withText ? this.draft?.getText() ?? '' : undefined });
     this.onChange();
   }
+  refresh(): void { this.publish(); }
   log(text: string): void {
     this.log_ = (this.log_ + text).slice(-20000);
     void this.panel?.webview.postMessage({ type: 'log', text: this.log_ });

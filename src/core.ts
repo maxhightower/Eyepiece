@@ -151,3 +151,8 @@ export function editsTestCode(before: string, after: string): boolean {
   return lineDiff(before, after).some(line => (line.kind === '+' || line.kind === '-') && !/^\s*(#|\/\/)/.test(line.text) && testWords.test(line.text));
 }
 export const asksForTestChange = (request: string): boolean => /\btests?\b/i.test(request);
+/** Parses a model's JSON reply. Some models wrap it in a Markdown fence despite the prompt. */
+export function parseModelJson(text: string): unknown {
+  const fenced = /^\s*```(?:json)?\s*\n([\s\S]*?)\n?```\s*$/.exec(text);
+  return JSON.parse(fenced ? fenced[1]! : text);
+}

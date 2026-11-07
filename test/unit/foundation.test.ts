@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { normalizeSettings, describeStatus, targetLanguages, languageOptions, filterLanguages } from '../../src/config';
+import { normalizeSettings, describeStatus, targetLanguages, languageOptions, filterLanguages, providerIds } from '../../src/config';
 import { UnavailableProvider } from '../../src/providers/unavailable';
 import type { TranslationRequest } from '../../src/providers/types';
 const request: TranslationRequest = { source: { uri: 'file:///sample.rs', text: 'fn main() {}', language: 'rust', revision: 'fixture' }, targetLanguage: 'python' };
@@ -35,6 +35,7 @@ test('UI buttons are declared and sit left of neighbouring editor title buttons'
   assert.ok(fs.existsSync(path.join(root, contributes.viewsContainers.activitybar[0].icon)));
   assert.match(fs.readFileSync(path.join(root, '.vscodeignore'), 'utf8'), /!media/);
   assert.deepEqual(contributes.configuration.properties['eyepiece.targetLanguage'].enum, Object.keys(targetLanguages));
+  assert.deepEqual(contributes.configuration.properties['eyepiece.provider'].enum, [...providerIds]);
 });
 test('language search matches labels and ids, ignoring case', () => {
   const found = (query: string) => filterLanguages(languageOptions(), query).map(option => option.id);

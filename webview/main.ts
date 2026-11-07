@@ -15,7 +15,7 @@ import { languagePicker } from './picker';
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
 interface DiffLine { kind: ' ' | '+' | '-' | '…'; text: string }
-interface State { status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
+interface State { provider: string; status: string; error: string; busy: boolean; cancellable: boolean; language: string; languages: Array<{ id: string; label: string }>; hasDraft: boolean; review?: { diff: DiffLine[]; explanation: string; tests?: { diff: DiffLine[]; blocked: boolean; canOmit: boolean } }; notes: string[]; log: string; text?: string }
 
 const grammar = (id: string): Extension => ({ english: markdown(), rust: rust(), c: cpp(), python: python(), typescript: javascript({ typescript: true }), javascript: javascript(), go: go(), java: java(), csharp: cpp(), cpp: cpp() } as Record<string, Extension>)[id] ?? [];
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; };
@@ -27,7 +27,8 @@ const picker = languagePicker(id => { flush(); vscode.postMessage({ type: 'langu
 const languageLabel = element('span', 'language-label', 'Language');
 const previewButton = button('Preview Source Change', 'primary', () => { flush(); vscode.postMessage({ type: 'preview' }); });
 const draftsButton = button('Drafts', 'secondary', () => { flush(); vscode.postMessage({ type: 'drafts' }); });
-toolbar.append(languageLabel, picker.root, element('span', 'grow'), draftsButton, previewButton);
+const providerName = element('span', 'provider-name');
+toolbar.append(languageLabel, picker.root, providerName, element('span', 'grow'), draftsButton, previewButton);
 const banner = element('div', 'banner');
 const bannerText = element('span');
 const cancelButton = button('Cancel', 'secondary', () => vscode.postMessage({ type: 'cancel' }));
@@ -103,6 +104,7 @@ const render = (state: State) => {
   if (state.text !== undefined) setText(state.text);
   if (state.language !== current) { current = state.language; view.dispatch({ effects: syntax.reconfigure(grammar(current)) }); }
   picker.update(state.languages, state.language, state.busy);
+  providerName.textContent = state.provider ? `via ${state.provider}` : '';
   blocked = state.busy || !state.hasDraft;
   previewButton.disabled = blocked; draftsButton.disabled = state.busy; input.disabled = blocked;
   updateSend();
