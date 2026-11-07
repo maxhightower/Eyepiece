@@ -11,7 +11,7 @@ import { CliProvider, claudeCommand, codexCommand } from './cli';
 type ApiProvider = 'anthropic' | 'openai';
 const apiNames: Record<ApiProvider, string> = { anthropic: 'Anthropic', openai: 'OpenAI' };
 const isApi = (id: ProviderId): id is ApiProvider => id === 'anthropic' || id === 'openai';
-/** The Claude Code extension ships the official program, so a separate install is optional. */
+/** The provider extension ships the official program, so a separate install is optional. */
 function claudeProgram(): string {
   const extension = vscode.extensions.getExtension('anthropic.claude-code');
   const bundled = extension && join(extension.extensionPath, 'resources', 'native-binary', process.platform === 'win32' ? 'claude.exe' : 'claude');
